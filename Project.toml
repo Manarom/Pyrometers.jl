@@ -1,7 +1,7 @@
 name = "RadiationPyrometers"
 uuid = "f583effd-a810-4e6b-b1e2-2b4349a685d7"
-authors = ["Roman Mironov"]
 version = "1.0.0"
+authors = ["Roman Mironov"]
 
 [deps]
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
@@ -9,10 +9,12 @@ Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
 OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
 PlanckFunctions = "56edaee7-e77f-43d7-994d-8307b8de0a62"
+Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
 [compat]
 PlanckFunctions = "1.0.0"
+Roots = "3.0.6"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

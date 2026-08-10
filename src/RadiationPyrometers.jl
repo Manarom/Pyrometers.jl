@@ -1,10 +1,11 @@
 
 module RadiationPyrometers
-    using   Optimization,
-            OptimizationOptimJL,
-            LinearAlgebra,
+       #Optimization,
+            #OptimizationOptimJL,
+    using   LinearAlgebra,
             StaticArrays,
-            OrderedCollections 
+            OrderedCollections, 
+            Roots
     import  PlanckFunctions as Planck
     export Pyrometer,
         DefaultPyrometersTypes,
@@ -15,46 +16,65 @@ module RadiationPyrometers
 
 """
 const DefaultPyrometersTypes = OrderedDict(
-                    "P"=> SVector{2}([2.0; 2.6]),
-                    "M"=> SVector{1}([3.4]), 
-                    "D"=> SVector{1}([3.9]),
-                    "L"=> SVector{1}([4.6]),
-                    "E"=> SVector{2}([4.8, 5.2]),
-                    "F"=> SVector{1}([7.9]),
-                    "K"=> SVector{2}([8.0, 9.0]),
-                    "B"=> SVector{2}([9.1,14.0])
+                    :P => SVector{2}([2.0; 2.6]),
+                    :M => SVector{1}([3.4]), 
+                    :D => SVector{1}([3.9]),
+                    :L => SVector{1}([4.6]),
+                    :E => SVector{2}([4.8, 5.2]),
+                    :F => SVector{1}([7.9]),
+                    :K => SVector{2}([8.0, 9.0]),
+                    :B => SVector{2}([9.1,14.0])
     )
-    
-    struct Pyrometer{N} # this type supports methods for radiative pyrometers
-        type::String
-        λ::SVector{N,Float64}
-        ϵ::Base.RefValue{Float64}
-        """
-    Pyrometer(type::String)
 
-Pyrometer object Constructor, the type of pyrometer can chosen from the DefaultPyrometersTypes dictionary
-Input:
-type - pyrometer type, must be member of DefaultPyrometersTypes 
-"""
-        Pyrometer(type::String) = begin
+    abstract type AbstractPyrometer{N , T} end
+
+
+    struct RatioPyrometer{N , T , DT} <: AbstractPyrometer{N , T}
+        type::Symbol 
+        λ::NTuple{2 , DT}
+        ϵ1::Base.RefValue{T}
+        ϵ2::Base.RefValue{T}
+        RatioPyrometer(λ::Union{NTuple{2 , T} , NTuple{2 , NTuple{2,T}}}; 
+                            type::Symbol=:def ,  
+                            ϵ1::Number=1.0 , ϵ2::Number = 1.0) where T <: Number= begin
+            new{2 , T , eltype(λ)}(type , λ , Ref(ϵ1) ,  Ref(ϵ2))
+        end
+    end
+    e_slope(p::RatioPyrometer) = p.ϵ1[]/p.ϵ2[]
+
+    struct Pyrometer{N , T} <: AbstractPyrometer{N,T} # this type supports methods for radiative pyrometers
+        type::Symbol
+        λ::SVector{N,T}
+        ϵ::Base.RefValue{T}
+                """
+            Pyrometer(type::String)
+
+        Pyrometer object Constructor, the type of pyrometer can chosen from the DefaultPyrometersTypes dictionary
+        Input:
+        type - pyrometer type, must be member of DefaultPyrometersTypes 
+        """
+        Pyrometer(type::Symbol , D::DataType = Float64) = begin
             if haskey(DefaultPyrometersTypes,type) 
                 N = length(DefaultPyrometersTypes[type])
-                return new{N}(type,
+                return new{N , D}(type,
                            DefaultPyrometersTypes[type],
                            Ref(1.0)) 
             else
                  error("Unknown pyrometer type")
             end
         end
-        Pyrometer(;type::String,λ::Union{Vector{Float64},Float64},ϵ::Float64) = begin
-            @assert 0  < ϵ <= 1.0 "Emissivity should be within the (0..1] interval"
-            if λ isa Vector
+        Pyrometer(λ::NTuple{N , T}; type::Symbol=:def ,  ϵ::Number=1.0 ) where {N,T} = begin 
+            return new{N , T}(type,SVector{N}(λ),Ref(ϵ))
+        end
+        Pyrometer(λ::Union{AbstractVector{T} , T} ; type::Symbol=:def ,  ϵ::Number=1.0) where T <: Number = begin
+            #@assert 0  < ϵ <= 1.0 "Emissivity should be within the (0..1] interval"
+            if λ isa AbstractVector
                 N = length(λ)
                 @assert N == 1 || N == 2 "λ should be a vector of two  Floats or a single Float number"
             else
                 N = 1
             end
-            new{N}(type,SVector{N}(λ),Ref(ϵ))
+            new{N , T}(type,SVector{N}(λ),Ref(ϵ))
         end
     end
     """
@@ -63,80 +83,123 @@ type - pyrometer type, must be member of DefaultPyrometersTypes
 Returns the number of wavelengths
 """
 wlength(::Pyrometer{N}) where N = N
+is_narrow_band(::AbstractPyrometer)  = false
     """
     is_narrow_band(p::Pyrometer)
 
-True if pyrometer `p` is a narrow-band pyrometer (worsk on a fixed wavelengh region)
+True if pyrometer `p` is a narrow-band pyrometer (works on a fixed wavelengh region)
 """
-is_narrow_band(p::Pyrometer)  = wlength(p) == 2
+is_narrow_band(::Pyrometer{2})  = true
+is_narrow_band(::RatioPyrometer{2 , T , DT}) where {T , DT <: Tuple}  = true
 """
     is_fixed_wavelength(::Pyrometer{N}) where N
 
 True if Pyrometer is single wavelength
 """
-is_fixed_wavelength(::Pyrometer{N}) where N = N == 1
+is_fixed_wavelength(::Pyrometer{1}) = true
+is_fixed_wavelength(::RatioPyrometer{2 , T , DT}) where {T , DT <: Number} = true
+is_fixed_wavelength(::AbstractPyrometer) = false
     """
-    measure(p::Pyrometer,i::Float64)
+    measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: Number, T <: Number}
 
-Calculates the "measured" temperature from "mesaured" intensity by fitting the Planck function.
-The intensity units should be consistent with PlanckFunctions.ibb(λ,T) function for single wavelength pyrometer 
-and with PlanckFunctions.band_power(λ,T),
-it should be in [W/m²⋅sr⋅μm]
+Calculates the "measured" temperature from "measured" signal `i`.
+The signal units should be:
+$(Planck.units(Planck.ibb)) - for a single wavelength pyrometer , 
+$(Planck.units(Planck.band_power)) - for  wide - band pyrometer ,
+`dimentionless`  - for sigle wavelength spectral ratio and wide-band spectral ratio; 
+
+# Arguments:
+`p` - pyrometer object
+`i` - measured signal
+(optional)
+`T_starting`  - starting temperature value
+
+"""
+function measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: Number, T <: Number}
+        ϵ = _get_epsilon_equivalent(p)
+        λ = p.λ
+        return Roots.find_zero(t -> _Dₜpyro(λ , i , t , ϵ) , T_starting ,  Roots.Halley())  
+    end
+    Dₜpyro(p::AbstractPyrometer , i , t) = _Dₜpyro(p.λ , i , t , _get_epsilon_equivalent(p))
+    _get_epsilon_equivalent(p::Pyrometer)  = p.ϵ[]
+    _get_epsilon_equivalent(p::RatioPyrometer)  = e_slope(p)
+    (p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i , T_starting = T_starting)
+    # radiation pyrometer in band 
+    _Dₜpyro(λ::SVector{2} , i , t  , ϵ) = _to_halley(Planck.Dₜband_power(t , λₗ = λ[1] , λᵣ = λ[2])  , i , ϵ) 
+    # radiation pyrometry for single wavelength
+    _Dₜpyro(λ::SVector{1} , i , t  , ϵ) = _to_halley(Planck.Dₜibb(λ[] , t)  , i , ϵ) 
+    # spectral ratio pyrometers (single wavelengh)
+    _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Number = _to_halley(Planck.Dₜspectral_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
+    # spectral ratio band pyrometer 
+     _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Tuple = _to_halley(Planck.Dₜspectral_band_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
+    """
+    _to_halley(tpl , i , ϵ)
+
+Internal function which converts arguments to Roots.jl Halley method from PlanckFunctions Dₜ ... function 
+"""
+_to_halley(tpl , i , ϵ) = begin 
+        (bp , bpd , bpdd) = (tpl[1] , tpl[2] , tpl[3])
+        iim = (ϵ *bp - i)
+        return ( iim ,  iim / (ϵ * bpd) , bpd/bpdd)
+    end
+
+    """
+        measure_with_env(p::Pyrometer{2}, i_total::Number, Tenv::Number; T_starting=600.0)
+
+    
+    """
+    function measure_with_env(p::Pyrometer, Tmeasured::T, Tenv::Number , ϵ_env::Number = 1.0) where {T}
+        ϵ = _get_epsilon_equivalent(p)
+        measured_signal = signal(p , Tmeasured)
+        reflected_signal = ϵ_env * (one(T) - ϵ) * signal(p , Tenv) / ϵ
+        return p(measured_signal - reflected_signal)
+    end    
+    """
+    signal(p::Pyrometer , Tmeasured)
+
+Returns the signal value which will give the temperature `Tmeasured`
+"""
+signal(p::Pyrometer{1} , Tmeasured::Number)  = p.ϵ[] * Planck.ibb(p.λ[] , Tmeasured)
+signal(p::Pyrometer{2} , Tmeasured::Number) = p.ϵ[] * Planck.band_power(Tmeasured , λₗ=p.λ[1] , λᵣ=p.λ[2])
+signal(p::RatioPyrometer{2 , T , DT} , Tmeasured::Number)  where { T , DT <: Number} = Planck.spectral_ratio(p.λ[1] , p.λ[2] , Tmeasured , e_slope = e_slope(p))
+signal(p::RatioPyrometer{2 , T , DT} , Tmeasured::Number)  where { T , DT <: Tuple} = Planck.spectral_band_ratio(p.λ[1] , p.λ[2] , Tmeasured , e_slope = e_slope(p))
+
+    """
+    fit_ϵ(p::AbstractPyrometer , Tmeasured::Number , Treal::Number)
+
+Finds the emissivity or e_slope 
 Input:
 p - pyrometer object
-i - measured intensity in [W/(m²⋅sr⋅μm)] or integral (over wavelength spectral intensity) in [W/(m²⋅sr)] 
-returns the temperature "measured" by this pyrometer  
-(optional)
-T_starting  - starting temperature value
+Treal - real temperature of the surface, Kelvins
+Tmeasured - temperature measured by the pyrometer, Kelvins
 """
-    function measure(p::Pyrometer,i::Float64;T_starting::Float64=600.0)
-        tup = (p,i)
-        if !is_narrow_band(p) # single wavelength pyrometer
-            fun = OptimizationFunction((t,tup)-> norm(tup[1].ϵ[]*Planck.ibb(tup[1].λ[1],t[]) - tup[2]))
-        else# narrow band pyrometer
-            fun = OptimizationFunction((t,tup)-> norm(tup[1].ϵ[]*Planck.band_power(t[],λₗ=tup[1].λ[1],λᵣ=tup[1].λ[2]) - tup[2]))
-        end
-        prob = OptimizationProblem(
-                fun, #fun
-                [T_starting],#starting temperature
-                tup)
-        sl = solve(prob,NelderMead())
-        return sl.u[]   
+function fit_ϵ(p::AbstractPyrometer , Tmeasured::Number , Treal::Number)
+         return _get_epsilon_equivalent(p) * signal(p , Tmeasured)/signal(p , Treal)
     end
-    (p::Pyrometer)(i) = measure(p , i)
+fit_ϵ!(p::AbstractPyrometer , Tmeasured::Number , Treal::Number) = set_emissivity!(p , fit_ϵ(p , Tmeasured , Treal))
     """
-    intensity(p::Pyrometer , Tmeasured)
+    convert_temperature(p::AbstractPyrometer , Tmeasured  , ϵ_new)
 
-Returns the intensity value which will give the temperature `Tmeasured`
+Converts temperature `Tmeasured` measured using pyrometer `p` with it specified emissivity 
+to a new temperature measured with `ϵ_new` , the type of `ϵ_new` depends on the type of pyrometer 
+if `ϵ_new` is a `Number` than if p is `RatioPyrometer` it assumes `e_new` is `e_slope`, if 
+`e_new` is `NTuple{2 , Number}` it modifies both emissivities at two wavelength
 """
-function intensity(p::Pyrometer , Tmeasured)
-        return   if !is_narrow_band(p)
-            p.ϵ[] * Planck.ibb(p.λ , Tmeasured)
-        else
-            p.ϵ[] * Planck.band_power(Tmeasured , λₗ=p.λ[1] , λᵣ=p.λ[2])
-        end
-    end
-        """
-        convert_temperature(p , Tmeasured  , ϵ_new)
-
-    Converts temperature `Tmeasured` measured using pyrometer `p` with it specified emissivity 
-    to a new temperature measured with `ϵ_new`
-    """
-    function convert_temperature(p::Pyrometer , Tmeasured  , ϵ_new)
-        i = intensity(p , Tmeasured)
-        _e = p.ϵ[]
-        set_emissivity(p , ϵ_new)
-        Tnew = measure(p , i)
-        set_emissivity(p , _e) # returning previous emissivity
-        return Tnew
-    end
+function convert_temperature(p::AbstractPyrometer , Tmeasured  , ϵ_new)
+    i = signal(p , Tmeasured)
+    _e = _get_epsilon_equivalent(p)
+    set_emissivity!(p , ϵ_new)
+    Tnew = measure(p , i)
+    set_emissivity!(p , _e) # returning previous emissivity
+    return Tnew
+end
     """
     Base.isless(p1::Pyrometer,p2::Pyrometer)
 
 Vector of Pyrometer objects can be sorted using isless
 """
 function Base.isless(p1::Pyrometer,p2::Pyrometer) # is used to sort the vector of pyrometers
-        return all(p1.λ.<p2.λ)
+        return all(p1.λ .< p2.λ)
     end
     """
     wavelength_number()
@@ -151,7 +214,7 @@ function wavelengths_number()
 
 Returns the total number of wavelength for the vector of pyrometers
 """
-function wavelengths_number(p::Vector{Pyrometer})
+function wavelengths_number(p::Base.AbstractVecOrTuple{D}) where D <: AbstractPyrometer
     return sum(wlength , p)
 end
     """
@@ -202,23 +265,25 @@ Creates the vector of all default pyrometers
 """
 function produce_pyrometers()
         pyr_vec = Vector{Pyrometer}()
-        for l in DefaultPyrometersTypes
-            push!(pyr_vec,Pyrometer(l[1]))
+        for (k ,l) in DefaultPyrometersTypes
+            push!(pyr_vec,Pyrometer(l[1]  , type = k))
         end
         sort!(pyr_vec) # sorting according to the wavelength increase
         return pyr_vec
     end
     """
-    set_emissivity(p::Pyrometer,em_value::Float64)
+    set_emissivity!(p::Pyrometer,em_value::Float64)
 
 Setter for spectral emissivity
 """
-function set_emissivity(p::Pyrometer,em_value::Float64)
-        if !(0.0 < em_value <= 1.0)
-            em_value = 1.0
-        end
-        p.ϵ[] = em_value
-    end
+set_emissivity!(p::Pyrometer , em_value::Number) = (p.ϵ[] = em_value)
+set_emissivity!(p::RatioPyrometer , em_value::Number) = begin 
+    p.ϵ1[]  = em_value * p.ϵ2[] 
+end
+set_emissivity!(p::RatioPyrometer{N , T} , em_value::NTuple{2 , D}) where {D <: Number , N , T} = begin 
+    p.ϵ1[]  = T(em_value[1])
+    p.ϵ2[]  = T(em_value[2]) 
+end
 
     """
     fit_ϵ!(p::Vector{Pyrometer},Treal::Float64,Tmeasured::Vector{Float64})
@@ -232,12 +297,12 @@ Treal - real temperature of the surface, Kelvins
 Tmeasured - temperatures measured by the pyrometers, in Kelvins, [Nx0]
 
 """
-function fit_ϵ!(p::Vector{Pyrometer},Treal::Float64,Tmeasured::Vector{Float64})
+function fit_ϵ!(p::Vector{Pyrometer} , Treal::D , Tmeasured::Vector{T}) where {D <: Number ,T <: Number}
         @assert length(p)==length(Tmeasured)  "Vectors must be of the same size"
         N = length(p)
-        e_out = Vector{Float64}(undef,N)
+        e_out = Vector{T}(undef , N)
         Threads.@threads for i in 1:N
-            @inbounds e_out[i] = fit_ϵ!(p[i],Tmeasured[i],Treal)
+            @inbounds e_out[i] = fit_ϵ!(p[i] , Tmeasured[i] , Treal)
         end
         return e_out
     end
@@ -264,41 +329,7 @@ function fit_ϵ_wavelength!(p::Vector{Pyrometer},Treal::Float64,Tmeasured::Vecto
         end
         return e_out
     end
-    """
-    fit_ϵ!(p::Pyrometer,Tmeasured::Float64,Treal::Float64)
 
-Optimizes the emissivity of the pyrometer to make measured by the pyrometer temperature fit
-fit the real temperature
-
-Input:
-p - pyrometer object
-Treal - real temperature of the surface, Kelvins
-Tmeasured - temperature measured by the pyrometer, Kelvins
-"""
-function fit_ϵ!(p::Pyrometer,Tmeasured::Float64,Treal::Float64;optimizer = NelderMead())
-        # fits the emssivity of the pyrometer
-        # Tmeasured - is the temperature measured by the pyrometer 
-        # Treal  - is the real temperature of the surface
-        # the real temperature of the surface should be higher due to the emissivity
-        if Treal<Tmeasured
-            (Treal,Tmeasured)=(Tmeasured,Treal)
-        end
-        # tup = (p,Tmeasured,Treal)
-        if length(p.λ)==1 # for pyrometers with fixed wavelength
-            fun = OptimizationFunction((ϵ,tup)->norm(Planck.ibb(tup[1].λ[1],tup[2]) - ϵ[1]*Planck.ibb(tup[1].λ[1],tup[3])),AutoForwardDiff())
-        else # pyrometer with limited band
-            fun = OptimizationFunction((ϵ,tup)->norm(Planck.band_power(tup[2],λₗ=tup[1].λ[1],λᵣ=tup[1].λ[2]) .- ϵ[1]*Planck.band_power(tup[3],λₗ=tup[1].λ[1],λᵣ=tup[1].λ[2])),AutoForwardDiff())
-        end
-        prob = OptimizationProblem(
-            fun, #fun
-           [0.1],#starting vectors
-           (p,Tmeasured,Treal),
-           lb=[0.00],
-           ub=[1.0])
-        res = solve(prob,optimizer)
-        set_emissivity(p,res.u[1])
-        return p.ϵ[]
-    end
     """
     fit_ϵ_wavelength!(p::Pyrometer,Tmeasured::Float64,Treal::Float64)
 
@@ -333,14 +364,8 @@ function switch_the_type(λ::Float64)
         end 
         return ""
     end
-
-    function Base.show(io::IO, p::Pyrometer{N}) where N 
-        if N==2
-            print(io, "$(p.type) -type: Narrow-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
-        elseif N==1
-            print(io, "$(p.type) -type: Fixed-wavelength pyrometer:λ = $(p.λ[1]) μm,ϵ = $(p.ϵ[])")
-        else
-            print(io,p)
-        end
-    end
+    Base.show(io::IO, p::Pyrometer{1}) = print(io, "$(p.type) -type: Fixed-wavelength pyrometer:λ = $(p.λ[1]) μm,ϵ = $(p.ϵ[])")
+    Base.show(io::IO, p::Pyrometer{2}) = print(io, "$(p.type) -type: Narrow-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
+    Base.show(io::IO, p::RatioPyrometer{2 , T , DT}) where {T , DT <: Number} = print(io, "$(p.type) -type: Fixed-wavelength's spectral ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
+    Base.show(io::IO, p::RatioPyrometer{2 , T , DT}) where {T , DT <: Tuple} = print(io, "$(p.type) -type: Narrow-band spectral ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
 end

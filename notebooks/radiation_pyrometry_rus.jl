@@ -538,6 +538,9 @@ md" Interpolator location $(@bind interpolator_folder TextField(120,default = @_
 # ╔═╡ 96feae26-99e4-45c9-869b-410ec7965b63
 interpolators_in_folder = collect(f for f in readdir(interpolator_folder) if contains(f , ".jld2")  );
 
+# ╔═╡ 1811e43c-f7db-47b1-9b83-bb38455d7db3
+pyrometers_vector2 = deepcopy(pyrometers_vector);
+
 # ╔═╡ 8ece7476-4257-49f8-a400-50bcc347908d
 use_external_lamp && !isempty(interpolators_in_folder) && md""" Select interpolator file $(
 @bind interpolator_file_name Select(
@@ -550,9 +553,6 @@ if use_external_lamp && !isempty(interpolators_in_folder)
 	lamp_interpolator =JLD2.load(joinpath(interpolator_folder , interpolator_file_name))["lamp_interpolator"]
 	voltage_range = 100:10:240
 end
-
-# ╔═╡ 1811e43c-f7db-47b1-9b83-bb38455d7db3
-pyrometers_vector2 = deepcopy(pyrometers_vector);
 
 # ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
 md" **Пересчитать матрицу ошибки измерений $(@bind is_recalculate CheckBox(false))**"
@@ -626,6 +626,26 @@ md"""
 if  use_custom
 	p_custom = RadiationPyrometers.Pyrometer(type = "C" , λ = [custom_waves...] , ϵ = 1.0)
 end;
+
+# ╔═╡ 6674b895-8aa9-4cbb-a407-82892128ca3e
+last_column_plot_data = Dict{String, Matrix{Float64}}()
+
+# ╔═╡ 0428e504-e163-4945-a2fa-7175e0b33020
+last_column_plot_data
+
+# ╔═╡ 52312616-c471-4b35-bb98-46c42a82d191
+begin 
+	last_column_plot = nothing
+	emissivity_type
+	if !isempty(last_column_plot_data)
+		last_column_plot = Plots.plot()
+		for (k,d) in last_column_plot_data
+			Plots.plot!(last_column_plot , d[:,1] .- 273.15, d[:,2];plot_common_args..., label = to_names[k] , xticks =10)
+		end
+	end
+	xlabel!(last_column_plot , "Температура, ᵒC")
+	ylabel!(last_column_plot , "ΔT/T, %")
+end
 
 # ╔═╡ c9634225-fa52-4747-8f45-3511141bd164
 md""" 
@@ -719,8 +739,8 @@ for (i , (k , d)) in enumerate(Tmeas)
 	pyr_data[i , 3] = d.ΔT
 	pyr_data[i , 4] = d.ΔTrel
 	if d.ΔT < dT_opt
-		dT_opt = d.ΔT
-		best_pyr = Pair(k , d.Tmeas)
+		global dT_opt = d.ΔT
+		global best_pyr = Pair(k , d.Tmeas)
 	end
 end
 pretty_table(HTML,pyr_data, column_labels= ["Тип","Тизм","ΔT, K","ΔT,%"] , title  ="Ошибка определения температуры поверхности пирометрами различных типов при температуре  поверхности образца T₁= $(T1) и U = $(T2) лампы $(interpolator_file_name)" )
@@ -780,7 +800,7 @@ md" **Выбор типа пирометра** : $(@bind selected_type Select(kv
 # ╔═╡ 45396db0-b967-456a-b0e2-eec411675827
 if is_recalculate #data preparation block
 
-	T1_scan = 300.15:50:2273.15
+	T1_scan = 300.15:50:1773.15
 	if !use_external_lamp
 		T2_scan = 1273.15:50:3800.15
 	else
@@ -846,6 +866,8 @@ if is_recalculate
 			
 			i_measured_int =  _is2 ? NumericalIntegration.integrate(_λ_pyr_interp , i_measured_selected) : i_measured_selected[]
 
+			
+			
 			t_meas = RadiationPyrometers.measure(p_selected , i_measured_int, T_starting = t1)
 			
 			ΔT_mat[i , j] = (t_meas - t1)/t1
@@ -906,6 +928,9 @@ if is_recalculate
 	end
 end
 
+# ╔═╡ ff5266ce-b7f2-46e2-a4b6-30057879bd97
+last_column_plot_data[emissivity_type] = hcat(collect(T1_scan) , abs.(vec(100*ΔT_mat[end , :])))
+
 # ╔═╡ ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 if is_recalculate
 
@@ -917,8 +942,8 @@ end
 # ╔═╡ dd1561e2-233f-425a-832f-130b49f0bf0b
 if is_recalculate
 	
-	out_table =  hcat(T2_scan[1:2:end], 100*ΔT_mat[1:2:end , 1:6:end])
-	col_nms =vcat("V",map(t -> "$(round(t - 273.15,digits =1))",  T1_scan[1:6:end]))
+	out_table =map(t->round(t,digits=2),  hcat(T2_scan[1:2:end], 100*ΔT_mat[1:2:end , 1:4:end]))
+	col_nms =vcat("V",map(t -> "$(round(t - 273.15,digits =1))",  T1_scan[1:4:end]))
 	pretty_table(HTML , out_table , title="$(to_names[emissivity_type])", column_labels=col_nms)
 end
 
@@ -3084,7 +3109,7 @@ version = "1.13.0+0"
 # ╟─854f8c06-aac6-464f-899c-41ca706b259a
 # ╟─9ce196c1-8915-46da-9aba-f13d7655959a
 # ╠═86af6afc-b28a-4e84-952a-bd29710374f8
-# ╟─efc35420-d0e6-4795-94b6-d43289b4de44
+# ╠═efc35420-d0e6-4795-94b6-d43289b4de44
 # ╟─6342e92b-4434-4e4b-aa2f-56405277caed
 # ╠═620dce38-97ce-495f-9b23-1b8290cbd973
 # ╟─b15bd3b0-0971-4b22-a109-0ed56afda615
@@ -3095,17 +3120,17 @@ version = "1.13.0+0"
 # ╟─36ba2396-bb5e-4d22-a58e-9ab27cd18b2d
 # ╟─91bbd553-4e4a-431d-9d54-b0f4882fd426
 # ╟─15f1519b-d924-4fa9-b212-eebba75c544a
-# ╟─01752ec9-b480-45b9-b299-d9c18d02a749
-# ╟─8ece7476-4257-49f8-a400-50bcc347908d
+# ╠═01752ec9-b480-45b9-b299-d9c18d02a749
 # ╟─0404bf20-57a4-4c7c-bf23-70d3541a6787
 # ╟─ad622962-9cd8-432c-a988-ec8b3d676077
 # ╟─c918b685-1b6e-4ce3-a1e6-501c6b4ffe0e
-# ╟─96feae26-99e4-45c9-869b-410ec7965b63
+# ╠═96feae26-99e4-45c9-869b-410ec7965b63
 # ╠═c5a00df1-ff02-4564-9838-e678f8ea7389
 # ╟─459f54a1-bbf0-4268-8bec-8142d436976a
 # ╠═391ebf67-2bd9-4c28-a00d-7f3d732625c4
 # ╟─1811e43c-f7db-47b1-9b83-bb38455d7db3
 # ╟─ac2343b5-6ea5-47b1-9c39-643cdf6d93af
+# ╟─8ece7476-4257-49f8-a400-50bcc347908d
 # ╟─54339700-71fd-48bf-a2ef-0c3267b9d81b
 # ╟─7f76bc22-77c3-4eb3-9d49-588e653df2e7
 # ╟─a0197a9a-34bf-4a3e-af8a-c23ea777f482
@@ -3114,16 +3139,20 @@ version = "1.13.0+0"
 # ╟─48b184a0-b1df-461e-a3f5-3c8be72ab875
 # ╟─f181980f-bf72-4468-8daa-9461c6c901e0
 # ╟─0cb50b02-ab41-416c-8610-c3ff318b117b
-# ╟─5b647454-e5fc-4c65-8a0a-8eb499955cc1
-# ╟─45396db0-b967-456a-b0e2-eec411675827
-# ╟─10298d52-d411-475f-b7f6-8562ed2a25bc
+# ╠═5b647454-e5fc-4c65-8a0a-8eb499955cc1
+# ╠═45396db0-b967-456a-b0e2-eec411675827
+# ╠═6674b895-8aa9-4cbb-a407-82892128ca3e
+# ╠═ff5266ce-b7f2-46e2-a4b6-30057879bd97
+# ╠═0428e504-e163-4945-a2fa-7175e0b33020
+# ╠═52312616-c471-4b35-bb98-46c42a82d191
+# ╠═10298d52-d411-475f-b7f6-8562ed2a25bc
 # ╟─c9634225-fa52-4747-8f45-3511141bd164
 # ╟─3e19d251-91f6-4383-bfc8-ffe816570f42
 # ╟─ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 # ╟─efcc25ee-a507-4334-b338-f3e050a50c6b
-# ╟─dd1561e2-233f-425a-832f-130b49f0bf0b
+# ╠═dd1561e2-233f-425a-832f-130b49f0bf0b
 # ╠═17131508-d23b-4e95-9303-e4b685dda736
-# ╠═05ec0ea2-cfec-4e91-a46a-68bbdaefd562
+# ╟─05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 # ╟─e480137d-b6d9-4e18-92f0-640292bbb5f0
 # ╟─302a58e0-ffba-464b-a962-7f85bca897c6
 # ╟─cdf36fa2-9719-405c-86b9-2c78ee815dfe
