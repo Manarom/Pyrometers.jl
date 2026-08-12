@@ -21,6 +21,7 @@ begin
 	import Pkg 
 	notebook_dir = @__DIR__()
 	Pkg.activate(notebook_dir)
+	Pkg.resolve()
 	using Revise
 	using Pyrometers  , Plots , PlutoUI , PrettyTables , DelimitedFiles , Interpolations 
 	using QuadGK
@@ -365,17 +366,28 @@ $(@bind T_ref3  Slider(ref_T,show_value=true,default = ref_T[end]))
 begin 
 	full_wavelengths_range = Pyrometers.full_wavelength_range(pyrometers_vector)
 	jj = indexin(T_ref1,ref_T)[]
+	foreach(pyrometers_vector) do p
+		Pyrometers.set_emissivity!(p , 1.0)
+	end
+
+	
 	ej = Pyrometers.fit_ϵ_wavelength!(pyrometers_vector,T_ref1,bb_calibration_table_data[jj,2:end])
 	pppp = Plots.plot(full_wavelengths_range, ej, title="Spectral emissivity of the blackbody reference",label ="T = $(ref_T[jj])",grid=true)
-	for T_reference in (T_ref2,T_ref3)
+	for T_reference in (T_ref2 , T_ref3)
+		foreach(pyrometers_vector) do p
+			Pyrometers.set_emissivity!(p , 1.0)
+		end
 		global jj = indexin(T_reference,ref_T)[]
-		global ej = Pyrometers.fit_ϵ_wavelength!(pyrometers_vector,ref_T[jj],bb_calibration_table_data[jj,2:end])
-		Plots.plot!(pppp,full_wavelengths_range, ej, label=" T = $(ref_T[jj])")
+		global ej = Pyrometers.fit_ϵ_wavelength!(pyrometers_vector , ref_T[jj] , bb_calibration_table_data[jj , 2:end])
+		Plots.plot!(pppp , full_wavelengths_range, ej, label=" T = $(ref_T[jj])")
 	end
 	xlabel!(pppp,"Wavelength, μm")
 	ylabel!(pppp,"Emissivity")
 	pppp
 end
+
+# ╔═╡ 8a6fe87d-0f7c-4577-9ac2-ea1ecf71016b
+pyrometers_vector
 
 # ╔═╡ 86af6afc-b28a-4e84-952a-bd29710374f8
 λ2 = collect(range(0.1,15.0,1000));
@@ -627,10 +639,10 @@ Pyrometers.integral_emissivity(p_selected , eint , 1573.15)
 Pyrometers.set_emissivity!(p_selected , Pyrometers.integral_emissivity(p_selected , eint , 1500.0))
 
 # ╔═╡ 7450bf72-3a21-4322-995b-36e16e62fd18
-T_measured = p_selected(dfff)
+T_measured = p_selected(i)
 
 # ╔═╡ 43576cb6-87d6-4bcc-90bd-a7ab754e1245
-Pyrometers.corrected_temperature(p_selected ,  T_measured , 1873)
+Pyrometers.corrected_temperature(p_selected ,  T_measured , 1873 , 1.0)
 
 # ╔═╡ ca361b35-22b3-4c8f-a1c2-ca5ffc594eff
 p_selected
@@ -721,7 +733,8 @@ end
 # ╟─c5ac80ee-8143-4c28-bbff-2ac761c71fac
 # ╟─0c9fe7b1-374c-4fb8-9cfe-9337389713bf
 # ╟─bc2d93ae-6c30-462c-96e0-30fdb84d7c63
-# ╟─d3199b6e-9779-4def-b701-fe85d1035045
+# ╠═d3199b6e-9779-4def-b701-fe85d1035045
+# ╠═8a6fe87d-0f7c-4577-9ac2-ea1ecf71016b
 # ╟─72947d97-0a97-4064-a2fe-08d19dec0f0e
 # ╟─9ce196c1-8915-46da-9aba-f13d7655959a
 # ╟─3581aa29-714b-422a-8feb-d1a0c3ebeec7
