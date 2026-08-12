@@ -1,18 +1,20 @@
-push!(LOAD_PATH,"../src/")
-#include("../src/RadiationPyrometers.jl")
-using Documenter, RadiationPyrometers
+using Documenter, Pyrometers
 mathengine = Documenter.MathJax3()
 makedocs(
-        sitename = "RadiationPyrometers.jl",
-        highlightsig = false,
-        checkdocs = :none,
-        format=Documenter.HTML(size_threshold = 2000 * 2^10),
-        pages=[
-                "RadiationPyrometers"=>"index.md"
-                "Examples"=>"pluto.md"
-                "RadiationPyrometers" => "pyrometers.md"
-               ]#
-			   )
+                sitename = "Pyrometers.jl",
+                highlightsig = false,
+                checkdocs = :none,
+                format=Documenter.HTML(size_threshold = 2000 * 2^10 , 
+                 mathengine = mathengine
+                ),
+                pages=[
+                        #"Pyrometers"=>"index.md"
+                        "Pyrometers" => "pyrometers.md",
+                        "Examples"=>"pluto.md"
+                        
+                ]
+               #
+        )
 #deploydocs(;
 #         repo="github.com/Manarom/BandPyrometry"
 #)

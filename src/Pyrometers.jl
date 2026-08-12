@@ -1,5 +1,5 @@
 
-module RadiationPyrometers
+module Pyrometers
 
     using   LinearAlgebra,
             StaticArrays,
@@ -8,10 +8,16 @@ module RadiationPyrometers
             QuadGK
 
     import  PlanckFunctions as Planck
-    export Pyrometer,
+    
+    export SpectralBandPyrometer, 
+        SingleWavelengthPyrometer , 
+        TwoBandsRatioPyrometer ,
+        TwoWavelengthRatioPyrometer , 
+        convert_temperature,
+        corrected_temperature,
+        integral_emissivity,
         DefaultPyrometersTypes,
-        fit_ϵ!,
-        fit_ϵ_wavelength!
+        fit_ϵ! , fit_ϵ
     """
     Default pyrometers types 
 
@@ -227,6 +233,9 @@ True if Pyrometer is a single wavelength
 is_single_wavelength(::SingleWavelengthPyrometer) = true
 is_single_wavelength(::TwoWavelengthRatioPyrometer)  = true
 is_single_wavelength(::AbstractPyrometer) = false
+
+is_spectral_ratio(::AbstractPyrometer) = false 
+is_spectral_ratio(::RatioPyrometer) = true
     """
     measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: Number, T <: Number}
 
@@ -323,35 +332,48 @@ signal(p::TwoBandsRatioPyrometer , Tmeasured::Number) = Planck.spectral_band_rat
     integrate_intensity(p::AbstractPyrometer , λ::AbstractVector , intensity::AbstractVector)
 
 Integral `intensity` signal from discrete data provided for wavelengths `λ`
-pyrometer specifies the spectral range 
+pyrometer specifies the spectral range. 
+Returns the quantity, which is equal to the type of pyrometer signal , e.g. if pyrometer is 
+
+- `SingleWavelengthPyrometer` - spectral intensity at the wavelength of pyrometer
+
+- `SpectralBandPyrometer`  - total intensity within the spectral range the pyrometer
+
+- `TwoWavelengthRatioPyrometer`  - ratio of intensities at two wavelength 
+
+- `TwoBandsRatioPyrometer`  - ratio of total intensities for two spectral ranges of the pyrometer
+
 """
 function integrate_intensity(p::AbstractPyrometer , λ::AbstractVector , intensity::AbstractVector) end
+
 function integrate_intensity(p::SpectralBandPyrometer , λ::AbstractVector , intensity::AbstractVector)
+
     @assert issorted(λ) "Wavelength vector must be sorted"
     @assert length(λ) == length(intensity) "Vectors must be of the same length"
-    (l , f)  = extract_pyrometer_range(p , λ)
-    _λ = @view λ[l:f]
-    _i = @view intensity[l:f]
-    _trapz(_λ , _i)
+    return _integrate_within_wavelength(p.λ[1] , p.λ[2] , λ , intensity)
 end
 
 integrate_intensity(p::SingleWavelengthPyrometer ,
                  λ::AbstractVector , intensity::AbstractVector) = _local_interpolate(p.λ[] , λ , intensity)
-                 
+
 integrate_intensity(p::TwoWavelengthRatioPyrometer ,
                  λ::AbstractVector , intensity::AbstractVector) = _local_interpolate(p.λ[1] , λ , intensity)/_local_interpolate(p.λ[2] , λ , intensity)
 
-function integrate_intensity(p::TwoBandsRatioPyrometer , λ , intensity) 
+function integrate_intensity(p::TwoBandsRatioPyrometer , λ::AbstractVector , intensity::AbstractVector) 
     @assert issorted(λ) "Wavelength vector must be sorted"
     @assert length(λ) == length(intensity) "Vectors must be of the same length"
     (i1 , i2)  = ntuple(2) do ii
-        (l , f)  = extract_subrange_inds(p.λ[ii]... , λ)
-        _λ = @view λ[l:f]
-        _i = @view intensity[l:f]
-        _trapz(_λ , _i)
+        _integrate_within_wavelength(p.λ[ii]... , λ , i)
     end
     return i1/i2
 end
+"""
+    _integrate_within_wavelength(λ1 , λ2 , λ , i)
+
+Trapz integration of discrete signal `i` given at wavelengths `λ`
+"""
+_integrate_within_wavelength(λ1 , λ2 , λ , i) = _simpson(subrange_view(λ1 , λ2 , λ , i)...)
+
     """
     fit_ϵ(p::AbstractPyrometer , Tmeasured::Number , Treal::Number)
 
@@ -416,8 +438,8 @@ function full_wavelength_range()
         λ = Vector{Float64}()
         pyr_names = Vector{String}()
         for l in DefaultPyrometersTypes
-            append!(λ,l[2])
-            push!(pyr_names,l[1])
+            append!(λ , l[2])
+            push!(pyr_names , l[1])
             if length(l[2])>1
                 push!(pyr_names,l[1])
             end
@@ -432,7 +454,7 @@ function full_wavelength_range()
 
 Creates the wavelengths vector covered by all pyrometers in vector `p`
 """
-function full_wavelength_range(p::Vector{Pyrometer})
+function full_wavelength_range(p::Vector{T}) where T <: AbstractPyrometer
         #sz = mapreduce(x->length(x),+,DefaultPyrometersTypes)
         λ = Vector{Float64}(undef,wavelengths_number(p))
         counter = 0
@@ -453,9 +475,9 @@ function full_wavelength_range(p::Vector{Pyrometer})
 Creates the vector of all default pyrometers 
 """
 function produce_pyrometers()
-        pyr_vec = Vector{Pyrometer}()
-        for (k ,l) in DefaultPyrometersTypes
-            push!(pyr_vec,Pyrometer(l[1]  , type = k))
+        pyr_vec = Vector{AbstractPyrometer}()
+        for k in keys(DefaultPyrometersTypes)
+            push!(pyr_vec, Pyrometer(k))
         end
         sort!(pyr_vec) # sorting according to the wavelength increase
         return pyr_vec
@@ -504,7 +526,9 @@ end
     integral_emissivity(p::SpectralBandPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , Tref::Number)
 
 Evaluate the integral emissivity within the pyrometer's working range using external spectral emissivity
-provided as discrete values `ϵ` for wavelengths `λ`.
+provided as discrete values `ϵ` for wavelengths `λ`. 
+    
+**`λ` vector must be sorted in ascending order**
 
 # Note
 This discrete version is highly efficient when the number of wavelength points within the pyrometer's 
@@ -518,11 +542,11 @@ See: [`integral_emissivity(p::Union{SpectralBandPyrometer, TwoBandsRatioPyromete
 """
 function integral_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} ,  λ::AbstractVector , ϵ::AbstractVector , Tref::Number)
     @assert issorted(λ) "Wavelengths vector must be sorted" 
-    return _integral_emissivity(p.λ[1] , p.λ[2] , λ , ϵ , Tref)
+    return _pyrometer_band_averaged(p.λ[1] , p.λ[2] , λ , ϵ , Tref)
 end
 
 function integral_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} ,  ϵ_func , Tref::Number)
-    return _integral_emissivity(p.λ[1] , p.λ[2] ,  ϵ_func , Tref)
+    return _pyrometer_band_averaged(p.λ[1] , p.λ[2] ,  ϵ_func , Tref)
 end
 
 integral_emissivity(p::SingleWavelengthPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , _::Number) = (_local_interpolate(p.λ[] , λ , ϵ) , )
@@ -530,22 +554,25 @@ integral_emissivity(p::SingleWavelengthPyrometer , ϵ_func , _::Number) = (ϵ_fu
 integral_emissivity(p::TwoWavelengthRatioPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , _::Number) = (_local_interpolate(p.λ[1] , λ , ϵ) , _local_interpolate(p.λ[2] , λ , ϵ))
 integral_emissivity(p::TwoWavelengthRatioPyrometer , ϵ_func , _::Number)= ϵ_func.(p.λ)
 
-_integral_emissivity(λ1::Number , λ2::Number ,  λ::AbstractVector , ϵ::AbstractVector , Tref) = _integral_emissivity((λ1,) , (λ2,) ,  λ , ϵ , Tref)
-function _integral_emissivity(λ1::NTuple{N}, λ2::NTuple{N} ,  λ::AbstractVector , ϵ::AbstractVector , Tref) where N
+_pyrometer_band_averaged(λ1::Number , λ2::Number ,  λ::AbstractVector , ϵ::AbstractVector , Tref) = _pyrometer_band_averaged((λ1,) , (λ2,) ,  λ , ϵ , Tref)
+function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N} ,  λ::AbstractVector , ϵ::AbstractVector , Tref) where N
     ntuple(N) do i
-        (f , l) = extract_subrange_inds(λ1[i] , λ2[i] , λ)
-        if isnothing(f) || isnothing(l) || f > l
-            error(" λ range does not include pyrometer range [$(λ1[i]), $(λ2[i])]")
-        end
-        _e = @view ϵ[f:l]
-        _l = @view λ[f:l]
+        ( _l , _e ) = subrange_view(λ1[i] , λ2[i] , λ , ϵ)
         return Planck.planck_averaged(_e , _l , Tref)
     end
 end
-
+function subrange_view(λ1 , λ2 , λ , i)
+        (f , l) = extract_subrange_inds(λ1 , λ2 , λ)
+        if isnothing(f) || isnothing(l) || f > l
+            error(" λ range must include range [$(λ1), $(λ2)]")
+        end
+        _i = @view i[f:l]
+        _l = @view λ[f:l]
+        return (_l , _i)
+end
 # this version to work with the esmissivity as a function/interpoaltion/polynomial
-_integral_emissivity(λ1::Number, λ2::Number  , ϵ_func , Tref) = _integral_emissivity((λ1,), (λ2,)  , ϵ_func , Tref)
-function _integral_emissivity(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , Tref) where N
+_pyrometer_band_averaged(λ1::Number, λ2::Number  , ϵ_func , Tref) = _pyrometer_band_averaged((λ1,), (λ2,)  , ϵ_func , Tref)
+function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , Tref) where N
     ntuple(N) do i
         l , r = λ1[i] , λ2[i]
         (emin , emax) = ϵ_func(l) , ϵ_func(r)
@@ -560,7 +587,8 @@ extract_pyrometer_range(p::SpectralBandPyrometer , λ::AbstractVector) =    extr
 
 extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsortedlast( λ , l2))
     """
-    fit_ϵ!(p::Vector{Pyrometer},Treal::Float64,Tmeasured::Vector{Float64})
+    fit_ϵ!(p::Vector{P} , Treal::D , Tmeasured::Vector{T}) where {D <: Number ,T <: Number , P <: AbstractPyrometer}
+
 
 Fits the emissivity of pyrometers to make measured temperature `Tmeasured` fit
 fit the real temperature `Treal`
@@ -571,7 +599,7 @@ Treal - real temperature of the surface, Kelvins
 Tmeasured - temperatures measured by the pyrometers, in Kelvins, [Nx0]
 
 """
-function fit_ϵ!(p::Vector{Pyrometer} , Treal::D , Tmeasured::Vector{T}) where {D <: Number ,T <: Number}
+function fit_ϵ!(p::Vector{P} , Treal::D , Tmeasured::Vector{T}) where {D <: Number ,T <: Number , P <: AbstractPyrometer}
         @assert length(p)==length(Tmeasured)  "Vectors must be of the same size"
         N = length(p)
         e_out = Vector{T}(undef , N)
@@ -582,15 +610,15 @@ function fit_ϵ!(p::Vector{Pyrometer} , Treal::D , Tmeasured::Vector{T}) where {
     end
 
 """
-    fit_ϵ_wavelength!(p::Vector{Pyrometer},Treal::Float64,Tmeasured::Vector{Float64})
+    fit_ϵ_wavelength!(p::Vector{T},Treal::D,Tmeasured::Vector{D})   where {T<: AbstractPyrometer , D <: Number}
 
 The same as [`fit_ϵ!`](@ref) except that it returns the vector of fitted emissivities 
 of the same length to the total number of wavelength in all pyrometers in vaector `p`,
 e.g. if p[i] is the narrow-band pyrometer 
 """
-function fit_ϵ_wavelength!(p::Vector{Pyrometer},Treal::Float64,Tmeasured::Vector{Float64})  
+function fit_ϵ_wavelength!(p::Vector{T},Treal::D,Tmeasured::Vector{D})   where {T<: AbstractPyrometer , D <: Number}
         total_wavelength_number =  sum(wlength,p)
-        e_out= Vector{Float64}(undef,total_wavelength_number)
+        e_out= Vector{D}(undef,total_wavelength_number)
         counter = 0
         for (i,e) in enumerate(fit_ϵ!(p,Treal,Tmeasured))
             if is_spectral_band(p[i]) 
@@ -615,10 +643,10 @@ Input:
     Tmeasured - temperature measured by the pyrometer, Kelvins
     Treal - real temeprature of the surface, Kelvins 
 """
-function fit_ϵ_wavelength!(p::Pyrometer , Tmeasured::Float64 , Treal::Float64) # this is the same as fit_ϵ! with the exception that 
+function fit_ϵ_wavelength!(p::AbstractPyrometer , Tmeasured::Float64 , Treal::Float64) # this is the same as fit_ϵ! with the exception that 
         # this function returns a vector of values, if pyrometer is single wavelength it returns one -element array
         e_out = similar(p.λ)
-        e_out .=fit_ϵ!(p,Tmeasured,Treal)
+        e_out .= fit_ϵ!(p , Tmeasured , Treal)
         return e_out
     end
     """
@@ -638,10 +666,10 @@ function switch_the_type(λ::Float64)
         end 
         return ""
     end
-    Base.show(io::IO, p::Pyrometer{1}) = print(io, "$(p.type) - type: single-wavelength pyrometer:λ = $(p.λ[1]) μm,ϵ = $(p.ϵ[])")
-    Base.show(io::IO, p::Pyrometer{2}) = print(io, "$(p.type) - type: spectral-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
-    Base.show(io::IO, p::RatioPyrometer{2 , T , DT}) where {T , DT <: Number} = print(io, "$(p.type) - type: two wavelength ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
-    Base.show(io::IO, p::RatioPyrometer{2 , T , DT}) where {T , DT <: Tuple} = print(io, "$(p.type) - type: two bands ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
+    Base.show(io::IO, p::SingleWavelengthPyrometer) = print(io, "$(p.type) - type: single-wavelength pyrometer:λ = $(p.λ[1]) μm,ϵ = $(p.ϵ[])")
+    Base.show(io::IO, p::SpectralBandPyrometer) = print(io, "$(p.type) - type: spectral-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
+    Base.show(io::IO, p::TwoWavelengthRatioPyrometer) = print(io, "$(p.type) - type: two wavelength ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
+    Base.show(io::IO, p::TwoBandsRatioPyrometer)  = print(io, "$(p.type) - type: two bands ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
     
     
      """
@@ -666,7 +694,12 @@ single point interpolation
         return ϵ_start + t * (ϵ_end - ϵ_start)
     end
 # internal function for trapz integration 
-    function _trapz(x::AbstractVector, y::AbstractVector)
+    """
+    _trapz(x::AbstractVector, y::AbstractVector)
+
+internal function for trapezoidal integration 
+"""
+function _trapz(x::AbstractVector, y::AbstractVector)
         N = length(x)
         @assert length(y) == N "Vectors must have the same length"
         N < 2 && return zero(eltype(y))
@@ -681,4 +714,65 @@ single point interpolation
 
         return s * 0.5
     end
+    _simpson(x::AbstractRange , y::AbstractVector) =_simpson_even(x , y) 
+    _simpson(x::AbstractVector , y::AbstractVector; is_evenly_spaced::Bool=false) = is_evenly_spaced ? _simpson_even(x , y) : _simpson_uneven(x , y)
+    """
+    _simpson_uneven(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
+
+internal function for Simpson's integration (uneven grids)
+"""
+function _simpson_uneven(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
+            N = length(x)
+            @assert length(y) == N "Vectors must have the same length"
+            N < 3 && return _tranpz(x , y)
+            S = promote_type(TX, TY, Float64)
+            s = zero(S)
+            @inbounds @fastmath @simd for i in 1:2:(N - 2)
+                h0 = x[i+1] - x[i]
+                h1 = x[i+2] - x[i+1]
+                h_sum = h0 + h1
+                
+                c0 = (2 * h0^2 + h0 * h1 - h1^2) / (6 * h0)
+                c1 = (h_sum^3) / (6 * h0 * h1)
+                c2 = (2 * h1^2 + h0 * h1 - h0^2) / (6 * h1)
+                
+                s += c0 * y[i] + c1 * y[i+1] + c2 * y[i+2]
+            end
+            if iseven(N)
+                @inbounds @fastmath s += 0.5 * (x[N] - x[N-1]) * (y[N] + y[N-1])
+            end
+
+            return s
+        end
+        """
+    _simpson_even(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
+
+Simpsons methods for evenly-spaced grids 
+"""
+    function _simpson_even(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
+        N = length(x)
+        @assert length(y) == N "Vectors must have the same length"
+        N < 3 && return _trapz(x, y) 
+
+        S = promote_type(TX, TY, Float64)
+        h = _get_step(x)
+
+        last_simpson_idx = isodd(N) ? (N - 1) : (N - 2)
+
+        s = S(y[begin]) + S(y[last_simpson_idx + 1])
+
+        @inbounds @fastmath @simd for i in 2:last_simpson_idx
+            coef = iseven(i) ? S(4) : S(2)
+            s += coef * y[i]
+        end
+
+        integral_val = s * h / 3
+
+        if iseven(N)
+            @inbounds @fastmath integral_val += 0.5 * h * (y[N-1] + y[N])
+        end
+        return integral_val
+    end
+    _get_step(x::AbstractRange) = step(x)
+    _get_step(x::AbstractVector)  =  x[2] - x[1]
 end
