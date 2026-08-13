@@ -152,6 +152,30 @@ p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
                 )
         end
     end
+
+    abstract type AbstractQuantity{LT , ET} end
+    """
+        Type wrapper for quantities provided as two vectors of discrete data 
+    """
+    struct TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractQuantity{LT , ET }
+        λ::LT
+        i::ET
+        TabularQuantity(l::LT , e::ET) where {LT <: AbstractVector , ET <: AbstractVector} = begin 
+            @assert issorted(l) "First argument must be sorted in ascending order"
+            @assert length(l) == length(e) "Two vectors must be of the same length"
+            return new{LT , ET}(l , e)
+        end
+    end
+     
+    struct WLQuantity{ET} <: AbstractQuantity{Nothing , ET}
+        i::ET
+        WLQuantity(callable_i::F) where F= new{F}(callable_i)
+    end
+    
+    struct WLTQuantity{ET} <: AbstractQuantity{Nothing , ET}
+        i::ET
+        WLTQuantity(callable_i::F) where F = new{F}(callable_i)
+    end
     """
     SingleWavelengthPyrometer
 
@@ -260,9 +284,18 @@ function measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: 
 
     Dₜpyro(p::AbstractPyrometer , i , t) = _Dₜpyro(p.λ , i , t , _get_epsilon_equivalent(p))
 
+    # there can be three different cases first the esmissivity is fixed (once calculated integral emissivity)
+    # second , the emissiivity depends on wavelength and provided as an interpolation 
+    # (must be provided as an external argument to measure)
+    # 3.) - the emissivity is both wavelength and temperature dependent , then it should be provided as 
+    # a function of two arguments e(λ , t)  - wavelength and temperature 
+
     _get_epsilon_equivalent(p::Pyrometer)  = p.ϵ[]
+
     _get_epsilon_equivalent(p::RatioPyrometer)  = e_slope(p)
+
     (p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i , T_starting = T_starting)
+
     # radiation pyrometer in band 
     _Dₜpyro(λ::SVector{2} , i , t  , ϵ) = _to_halley(Planck.Dₜband_power(t , λₗ = λ[1] , λᵣ = λ[2])  , i , ϵ) 
     # radiation pyrometry for single wavelength
@@ -270,7 +303,7 @@ function measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: 
     # spectral ratio pyrometers (single wavelengh)
     _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Number = _to_halley(Planck.Dₜspectral_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
     # spectral ratio band pyrometer 
-     _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Tuple = _to_halley(Planck.Dₜspectral_band_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
+    _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Tuple = _to_halley(Planck.Dₜspectral_band_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
     """
     _to_halley(tpl , i , ϵ)
 
@@ -281,11 +314,49 @@ _to_halley(tpl , i , ϵ) = begin
         iim = (ϵ *bp - i)
         return ( iim ,  iim / (ϵ * bpd) , bpd/bpdd)
     end
-
 """
-    corrected_temperature(p::Pyrometer, Tmeasured::Number, Tenv::Number, ϵ_env::Number=1.0)
+    subrange_view(λ1::Number , λ2::Number , λ::AbstractVector , i::AbstractVector)
 
-Calculate the actual surface temperature by excluding reflected ambient radiation.
+Returns view of two vectors based on `λ[ λ1 <= λ <= λ2]` , `λ` must be sorted in ascending order
+"""
+function subrange_view(λ1::Number , λ2::Number , e::TabularQuantity{LT , ET}) where {LT , ET}
+        (f , l) = extract_subrange_inds(λ1 , λ2 , e.λ)
+        if isnothing(f) || isnothing(l) || f > l
+            error(" λ range must include range [$(λ1), $(λ2)]")
+        end
+        _i = @view e.i[f:l]
+        _l = @view e.λ[f:l]
+        return (_l , _i)
+end
+extract_pyrometer_inds(p::SpectralBandPyrometer , λ::AbstractVector ) =    extract_subrange_inds(p.λ[1] , p.λ[2] , λ)
+extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsortedlast( λ , l2))
+"""
+    Type wrapper for [`TabularQuantity`](@ref)
+"""
+struct TabularEmissivityContext{E, L, F}
+    _e::E
+    _l::L
+    i_measured::F
+    λ_min::F
+    λ_max::F
+end
+
+function (ctx::TabularEmissivityContext)(t)
+
+    (f , _)  = Planck.weighted_value(ctx._e, ctx._l, t, Planck.ibb) 
+
+    f -=  ctx.i_measured
+
+    (df , _)= Planck.weighted_value(ctx._e, ctx._l, t, Planck.∇ₜibb) 
+    df 
+    dff = Planck.weighted_average(ctx._e, ctx._l, t, Planck.∇²ₜibb) * denom_pp
+
+    return (f, df, dff)
+end
+"""
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T; Tenv::Number , ϵ_env::Number ) where {T}
+
+Calculate the actual surface temperature by excluding stray radiation reflected to the pyrometers's FOV.
 
 If measurements are performed in an environment with a background temperature `Tenv`
 and a source emissivity `ϵ_env`, the pyrometer will overestimate the true surface
@@ -302,21 +373,29 @@ This function:
 # Arguments
 - `p::Pyrometer`: The pyrometer object containing surface emissivity and wavelength parameters.
 - `Tmeasured::Number`: The raw, uncorrected temperature reading from the pyrometer (Kelvins).
+(kwargs)
 - `Tenv::Number`: The temperature of the external radiation source or ambient environment (Kelvins).
 - `ϵ_env::Number`: The emissivity of the external radiation source (defaults to 1.0 for a blackbody environment).
 """
-function corrected_temperature(p::Pyrometer, Tmeasured::T, Tenv::Number , ϵ_env::Number ) where {T}
-        ϵ = _get_epsilon_equivalent(p)
-        measured_signal = signal(p , Tmeasured)
-        reflected_signal = ϵ_env * (one(T) - ϵ) * signal(p , Tenv) / ϵ
-        return p(measured_signal - reflected_signal) 
+function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T; Tenv::Number , ϵ_env::Number ) where {T}
+        return stray_radiation_corrected_temperature(p , Tmeasured , ϵ_env * signal(p , Tenv) / _get_epsilon_equivalent(p))
     end
-function corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation::Number) where {T}
+"""
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation::Number) where {T}
+
+    The  as  [`stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T; Tenv::Number , ϵ_env::Number )`](@ref)
+but external radiation is provided as a single value (it should be integrated within the pyrometer working range) 
+"""
+function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation::Number) where {T}
         ϵ = _get_epsilon_equivalent(p)
         measured_signal = signal(p , Tmeasured)
         reflected_signal =  (one(T) - ϵ) * incident_radiation
         return p(measured_signal - reflected_signal) 
-    end      
+    end 
+
+function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation_function) where {T}
+        return stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, integrate_intensity(p ,intensity_function = incident_radiation_function))
+    end     
     """
     signal(p::AbstractPyrometer , Tmeasured::Number)
 
@@ -329,13 +408,14 @@ signal(p::TwoWavelengthRatioPyrometer , Tmeasured::Number)  = Planck.spectral_ra
 signal(p::TwoBandsRatioPyrometer , Tmeasured::Number) = Planck.spectral_band_ratio(p.λ[1] , p.λ[2] , Tmeasured , e_slope = e_slope(p))
 
 """
-    integrate_intensity(p::AbstractPyrometer , λ::AbstractVector , intensity::AbstractVector)
+    integrate_intensity(p::AbstractPyrometer ; λ , intensity)
 
-Integral `intensity` signal from discrete data provided for wavelengths `λ`
-pyrometer specifies the spectral range. 
+Converts the input spectral `intensity` given as a discrete set of values for wavelengths `λ`
+to the pyrometer signal.
+
 Returns the quantity, which is equal to the type of pyrometer signal , e.g. if pyrometer is 
 
-- `SingleWavelengthPyrometer` - spectral intensity at the wavelength of pyrometer
+- `SingleWavelengthPyrometer` returns the spectral intensity at the wavelength of pyrometer
 
 - `SpectralBandPyrometer`  - total intensity within the spectral range the pyrometer
 
@@ -343,36 +423,53 @@ Returns the quantity, which is equal to the type of pyrometer signal , e.g. if p
 
 - `TwoBandsRatioPyrometer`  - ratio of total intensities for two spectral ranges of the pyrometer
 
+
+`λ` , `intensity`  (both at the same time) if the intensity is provided as a discrete set of points 
+
 """
-function integrate_intensity(p::AbstractPyrometer , λ::AbstractVector , intensity::AbstractVector) end
+function integrate_intensity(p::AbstractPyrometer ; λ::AbstractVector , intensity::AbstractVector) error("This state must not be reached") end
+"""
+    integrate_intensity(p::AbstractPyrometer ,  intensity_function)
 
-function integrate_intensity(p::SpectralBandPyrometer , λ::AbstractVector , intensity::AbstractVector)
+If the intensity is provided as a function of wl
+"""
+function integrate_intensity(p::AbstractPyrometer ,  intensity_function) error("This state must not be reached") end
 
-    @assert issorted(λ) "Wavelength vector must be sorted"
-    @assert length(λ) == length(intensity) "Vectors must be of the same length"
-    return _integrate_within_wavelength(p.λ[1] , p.λ[2] , λ , intensity)
-end
 
-integrate_intensity(p::SingleWavelengthPyrometer ,
-                 λ::AbstractVector , intensity::AbstractVector) = _local_interpolate(p.λ[] , λ , intensity)
+integrate_intensity(p::SpectralBandPyrometer ; λ::AbstractVector , intensity::AbstractVector) = _integrate_within_wavelength(p.λ[1] , p.λ[2] , λ , intensity)
+integrate_intensity(p::SpectralBandPyrometer , intensity_function) = _integrate_within_wavelength(p.λ[1] , p.λ[2] , intensity_function)
 
-integrate_intensity(p::TwoWavelengthRatioPyrometer ,
-                 λ::AbstractVector , intensity::AbstractVector) = _local_interpolate(p.λ[1] , λ , intensity)/_local_interpolate(p.λ[2] , λ , intensity)
-
-function integrate_intensity(p::TwoBandsRatioPyrometer , λ::AbstractVector , intensity::AbstractVector) 
-    @assert issorted(λ) "Wavelength vector must be sorted"
-    @assert length(λ) == length(intensity) "Vectors must be of the same length"
+function integrate_intensity(p::TwoBandsRatioPyrometer , intensity_function) 
     (i1 , i2)  = ntuple(2) do ii
-        _integrate_within_wavelength(p.λ[ii]... , λ , i)
+        _integrate_within_wavelength(p.λ[ii]... , intensity_function)
     end
     return i1/i2
 end
+# versions for single wavelength pyrometers 
+integrate_intensity(p::SingleWavelengthPyrometer ;
+                 λ::AbstractVector , intensity::AbstractVector) = _local_interpolate(p.λ[] , λ , intensity)
+integrate_intensity(p::SingleWavelengthPyrometer, intensity_function) = intensity_function(p.λ[])
+integrate_intensity(p::TwoWavelengthRatioPyrometer, intensity_function) = intensity_function(p.λ[1])/intensity_function(p.λ[2])
+integrate_intensity(p::TwoWavelengthRatioPyrometer ;
+                 λ::AbstractVector , intensity::AbstractVector) = _local_interpolate(p.λ[1] , λ , intensity)/_local_interpolate(p.λ[2] , λ , intensity)
+
+
 """
     _integrate_within_wavelength(λ1 , λ2 , λ , i)
 
-Trapz integration of discrete signal `i` given at wavelengths `λ`
+Simpson's method integration of discrete signal `i` given at wavelengths `λ`
 """
-_integrate_within_wavelength(λ1 , λ2 , λ , i) = _simpson(subrange_view(λ1 , λ2 , λ , i)...)
+function _integrate_within_wavelength(λ1 , λ2 , λ , intensity)
+    @assert issorted(λ) "Wavelength vector must be sorted"
+    @assert length(λ) == length(intensity) "Vectors must be of the same length"
+    return _simpson(subrange_view(λ1 , λ2 , λ , intensity)...)
+end
+"""
+    _integrate_within_wavelength(λ1 , λ2 , intensity_function)
+
+Using quadgk if the signal is provided as a callable
+"""
+_integrate_within_wavelength(λ1 , λ2 , intensity_function) = first(quadgk(intensity_function , λ1 , λ2 ))
 
     """
     fit_ϵ(p::AbstractPyrometer , Tmeasured::Number , Treal::Number)
@@ -548,28 +645,39 @@ end
 function integral_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} ,  ϵ_func , Tref::Number)
     return _pyrometer_band_averaged(p.λ[1] , p.λ[2] ,  ϵ_func , Tref)
 end
+"""
+    integral_temperature_dependent_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
+     ϵ_func , T::Number)
+
+Evaluate the integral emissivity within the pyrometer's working range using external spectral emissivity
+provided as a function of wavelength and temperature `ϵ(λ , T)`. 
+    
+# Returns
+`ϵ_int` computed as:
+`ϵ_int(T) = ∫ϵ(λ , T)ibb(λ , T)dλ / ∫ibb(λ , T)dλ`
+"""
+function integral_temperature_dependent_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
+     ϵ_func , T::Number)
+    return _pyrometer_band_temperature_dependent_averaged(p.λ[1] , p.λ[2] ,  ϵ_func , T)
+end
+
 
 integral_emissivity(p::SingleWavelengthPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , _::Number) = (_local_interpolate(p.λ[] , λ , ϵ) , )
 integral_emissivity(p::SingleWavelengthPyrometer , ϵ_func , _::Number) = (ϵ_func(p.λ[]) , )
 integral_emissivity(p::TwoWavelengthRatioPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , _::Number) = (_local_interpolate(p.λ[1] , λ , ϵ) , _local_interpolate(p.λ[2] , λ , ϵ))
 integral_emissivity(p::TwoWavelengthRatioPyrometer , ϵ_func , _::Number)= ϵ_func.(p.λ)
 
+
 _pyrometer_band_averaged(λ1::Number , λ2::Number ,  λ::AbstractVector , ϵ::AbstractVector , Tref) = _pyrometer_band_averaged((λ1,) , (λ2,) ,  λ , ϵ , Tref)
+_pyrometer_band_temperature_dependent_averaged(λ1::Number , λ2::Number ,  ϵ , Tref) = _pyrometer_band_temperature_dependent_averaged((λ1,) , (λ2,) ,   ϵ , Tref)
+
 function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N} ,  λ::AbstractVector , ϵ::AbstractVector , Tref) where N
     ntuple(N) do i
         ( _l , _e ) = subrange_view(λ1[i] , λ2[i] , λ , ϵ)
         return Planck.planck_averaged(_e , _l , Tref)
     end
 end
-function subrange_view(λ1 , λ2 , λ , i)
-        (f , l) = extract_subrange_inds(λ1 , λ2 , λ)
-        if isnothing(f) || isnothing(l) || f > l
-            error(" λ range must include range [$(λ1), $(λ2)]")
-        end
-        _i = @view i[f:l]
-        _l = @view λ[f:l]
-        return (_l , _i)
-end
+
 # this version to work with the esmissivity as a function/interpoaltion/polynomial
 _pyrometer_band_averaged(λ1::Number, λ2::Number  , ϵ_func , Tref) = _pyrometer_band_averaged((λ1,), (λ2,)  , ϵ_func , Tref)
 function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , Tref) where N
@@ -582,10 +690,23 @@ function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , Tr
         return (ϵ_baseline * denom + irem)/denom
     end
 end
+"""
+    _pyrometer_band_tdependent_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , T) where N
 
-extract_pyrometer_range(p::SpectralBandPyrometer , λ::AbstractVector) =    extract_subrange_inds(p.λ[1] , p.λ[2] , λ)
+Averages if the function is both wl and temperature dependent
+"""
+function _pyrometer_band_temperature_dependent_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , func , T) where N
+    ntuple(N) do i
+        l , r = λ1[i] , λ2[i]
+        (emin , emax) = func(l , T) , func(r , T)
+        ϵ_baseline = (emin + emax) / 2 # the idea is to exclude the average value 
+        irem, _ = quadgk(λ -> (func(λ , T) - ϵ_baseline) * Planck.ibb(λ, T), l, r)
+        denom = Planck.band_power(T , λₗ = l, λᵣ = r )
+        return (ϵ_baseline * denom + irem)/denom
+    end
+end
 
-extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsortedlast( λ , l2))
+
     """
     fit_ϵ!(p::Vector{P} , Treal::D , Tmeasured::Vector{T}) where {D <: Number ,T <: Number , P <: AbstractPyrometer}
 
@@ -659,13 +780,14 @@ Input:
 function switch_the_type(λ::Float64)
         for (k,λp) in DefaultPyrometersTypes
             if length(λp)==1
-                !isapprox(λ,λp[1],atol=0.05) ? continue : return k
+                !isapprox(λ  , λp[1] , atol=0.05) ? continue : return k
             else
-               !(λp[1]<=λ<=λp[2]) ? continue : return k
+               !(λp[1] <= λ <= λp[2]) ? continue : return k
             end
         end 
         return ""
     end
+
     Base.show(io::IO, p::SingleWavelengthPyrometer) = print(io, "$(p.type) - type: single-wavelength pyrometer:λ = $(p.λ[1]) μm,ϵ = $(p.ϵ[])")
     Base.show(io::IO, p::SpectralBandPyrometer) = print(io, "$(p.type) - type: spectral-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
     Base.show(io::IO, p::TwoWavelengthRatioPyrometer) = print(io, "$(p.type) - type: two wavelength ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
