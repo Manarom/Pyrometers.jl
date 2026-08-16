@@ -321,8 +321,8 @@ Returns view of two vectors based on `λ[ λ1 <= λ <= λ2]` , `λ` must be sort
 """
 function subrange_view(λ1::Number , λ2::Number , e::TabularQuantity{LT , ET}) where {LT , ET}
         (f , l) = extract_subrange_inds(λ1 , λ2 , e.λ)
-        if isnothing(f) || isnothing(l) || f > l
-            error(" λ range must include range [$(λ1), $(λ2)]")
+        if λ1 < first(e.λ) || λ2 > last(e.λ) || f > l
+            error("λ range [$(λ1), $(λ2)] goes outside available tabular data bounds [$(first(e.λ)), $(last(e.λ))]")
         end
         _i = @view e.i[f:l]
         _l = @view e.λ[f:l]
@@ -334,11 +334,9 @@ extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsorte
     Type wrapper for [`TabularQuantity`](@ref)
 """
 struct TabularEmissivityContext{E, L, F}
-    _e::E
     _l::L
+    _e::E
     i_measured::F
-    λ_min::F
-    λ_max::F
 end
 
 function (ctx::TabularEmissivityContext)(t)
@@ -348,11 +346,16 @@ function (ctx::TabularEmissivityContext)(t)
     f -=  ctx.i_measured
 
     (df , _)= Planck.weighted_value(ctx._e, ctx._l, t, Planck.∇ₜibb) 
-    df 
-    dff = Planck.weighted_average(ctx._e, ctx._l, t, Planck.∇²ₜibb) * denom_pp
+    
+    (dff , ) = Planck.weighted_value(ctx._e, ctx._l, t, Planck.∇²ₜibb) 
 
-    return (f, df, dff)
+    return (f , f/df , df/dff)
 end
+
+function measure(p::SpectralBandPyrometer , imeasured::Number , ϵ::TabularQuantity; T_starting::Number = 600.0)
+    ctx = TabularEmissivityContext(subrange_view(p.λ[1]  , p.λ[2] , ϵ)..., imeasured)
+    return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
+end 
 """
     stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T; Tenv::Number , ϵ_env::Number ) where {T}
 
