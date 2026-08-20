@@ -135,7 +135,7 @@ p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
             end
         end
         Pyrometer(λ::NTuple{N , T}; type::Symbol=:def ,  ϵ::Number=1.0 ) where {N,T} = begin 
-            return new{N , T}(type,SVector{N}(λ)
+            return new{N , T}(type , SVector{N}(λ)
                         , Ref(ϵ)
                         )
         end
@@ -154,9 +154,44 @@ p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
     end
 
     abstract type AbstractQuantity{LT , ET} end
-    """
-        Type wrapper for quantities provided as two vectors of discrete data 
-    """
+"""
+    TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractQuantity{LT , ET }
+
+Type wrapper around discrete 
+
+Supports both single-wavelength (monochromatic) and narrow-band (integrated spectral range) instruments.
+
+# Fields
+- `type::Symbol`: A unique identifier or descriptive name for the pyrometer model.
+- `λ::SVector{N, T}`: The operating wavelength(s). For single-wavelength pyrometers (`N=1`), it holds the target wavelength. For spectral band pyrometers (`N=2`), it defines the boundaries `[λₗ, λᵣ]`.
+- `ϵ::Base.RefValue{T}`: In-place mutable effective emissivity of the measured target surface.
+
+# Constructors
+
+    Pyrometer(type::Symbol, D::DataType=Float64)
+
+Construct a predefined pyrometer configuration extracted from the `DefaultPyrometersTypes` dictionary.
+
+    Pyrometer(λ::NTuple{N, T}; type::Symbol=:def, ϵ::Number=1.0)
+
+Construct a pyrometer using a tuple of wavelengths `λ`, which is automatically converted into a static vector `SVector`.
+
+    Pyrometer(λ::Union{AbstractVector{T}, T}; type::Symbol=:def, ϵ::Number=1.0)
+
+Universal constructor accepting `λ` either as a single scalar number (monochromatic) or as a vector (band boundaries).
+
+# Examples
+```julia
+# Create a predefined pyrometer configuration from the package dictionary
+p_builtin = Pyrometer(:P)
+
+# Monochromatic pyrometer at 0.65 μm
+p_single = Pyrometer(0.65, ϵ=0.85)
+
+# Wide band pyrometer covering 2.4 μm to 8.5 μm
+p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
+```
+"""
     struct TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractQuantity{LT , ET }
         λ::LT
         i::ET
@@ -166,97 +201,142 @@ p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
             return new{LT , ET}(l , e)
         end
     end
-     
-    struct WLQuantity{ET} <: AbstractQuantity{Nothing , ET}
-        i::ET
-        WLQuantity(callable_i::F) where F= new{F}(callable_i)
-    end
-    
-    struct WLTQuantity{ET} <: AbstractQuantity{Nothing , ET}
-        i::ET
-        WLTQuantity(callable_i::F) where F = new{F}(callable_i)
-    end
+    const IsothermalSpectralQuantity = Planck.IsothermalSpectralQuantity 
+    const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
+    const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
     """
-    SingleWavelengthPyrometer
+        Type wrapper for spectral quantities that  are differentible using 
+    ForwardDiff, the function , must accept two arguments `f(λ , T)`, here 
+    `λ ` - wavelengh, `μm`
+    `T` - temperature , `K`
 
-Type alias for a brightness pyrometer operating at **a single, fixed wavelength** (`Pyrometer{1}`). 
-Evaluates signals utilizing monochromatic Planck intensity functions (`ibb`).
+    If the function is non-differentible with respect to `T` 
+    """
+    struct ForawrdDiffDifferentibleSpectralQuantity{F} <: AbstractSpectralQuantity
+        f::F
+    end
+"""
+    SingleWavelengthPyrometer{N, T, DT} <: AbstractPyrometer{N, T}
+
+Type single -wavelengh pyrometer system. 
+
+# Fields
+- `type::Symbol`: A unique identifier or descriptive name for the pyrometer model.
+- `λ::SVector{1, DT}`: working wavelength ,`μm`
+- `ϵ::Base.RefValue{T}`: In-place mutable emissivity value.
+
+# Constructors
+    SingleWavelengthPyrometer(λ::Number; type::Symbol=:def, ϵ::Number=1.0)
+
+# Examples
+```julia
+# Single-wavelength pyrometer (0.85 μm)
+p = SingleWavelengthPyrometer(0.85, ϵ=0.9)
+```
 """
 const SingleWavelengthPyrometer = Pyrometer{1}
 """
     SpectralBandPyrometer
 
-Type alias for a brightness pyrometer operating over **a defined spectral band** (`Pyrometer{2}`). 
-Evaluates signals by integrating the Planck distribution function over the defined range (`band_power`).
+Type alias for a brightness pyrometer over **a defined spectral band**. 
+Evaluates signals by integrating the Planck distribution function over the defined spectral range.
+    
+# Fields
+- `type::Symbol`: A unique identifier or descriptive name for the pyrometer model.
+- `λ::SVector{2, DT}`: Spectral range 
+- `ϵ::Base.RefValue{T}`: In-place mutable emissivity value.
+
+# Constructors
+    SpectralBandPyrometer(λ1::Number , λ2::Number ; type::Symbol=:def, ϵ::Number=1.0)
+    SpectralBandPyrometer( λ1::NTuple{2 , <:Number} ; type::Symbol=:def, ϵ::Number=1.0)
+# Examples
+```julia
+# Spectral band pyrometer for 2.0 - 4.5 μm spectral band 
+p_band = SpectralBandPyrometer(2.0 , 4.5 , ϵ=0.9)
+```
 """
 const SpectralBandPyrometer = Pyrometer{2}
 #Constructors
-"""
-    SingleWavelengthPyrometer(λ::Number; type::Symbol=:def, ϵ::Number=1.0)
 
-
-"""
 SingleWavelengthPyrometer(λ::Number; type::Symbol=:def, ϵ::Number=1.0) = Pyrometer(λ; type=type, ϵ=ϵ)
-"""
-    SpectralBandPyrometer(λₗ::Number, λᵣ::Number; type::Symbol=:def, ϵ::Number=1.0)
 
-
-"""
 SpectralBandPyrometer(λₗ::Number, λᵣ::Number; type::Symbol=:def, ϵ::Number=1.0) = Pyrometer((λₗ, λᵣ); type=type, ϵ=ϵ)
-"""
-    SpectralBandPyrometer(λ::NTuple{2}; type::Symbol=:def, ϵ::Number=1.0)
 
-
-"""
 SpectralBandPyrometer(λ::NTuple{2}; type::Symbol=:def, ϵ::Number=1.0) = Pyrometer(λ ; type=type, ϵ=ϵ)
 """
     TwoWavelengthRatioPyrometer
 
-Type alias for a ratio pyrometer measuring the quotient of signals across **two discrete wavelengths**. 
-The underlying spectral coordinate type `DT` is expected to be a subtype of `Number`.
+Two-color spectral ratio pyrometer, working on two single wavelengths 
+    
+# Fields
+- `type::Symbol`: A unique identifier or descriptive name for the pyrometer model.
+- `λ1::Number`: First wl
+- `λ1::Number`: Second wl
+- `ϵ1::Base.RefValue{T}`: First wavelength emissivity.
+- `ϵ2::Base.RefValue{T}`: Second wavelength emissivity.
+
+# Constructors
+    TwoWavelengthRatioPyrometer(λ1::Number , λ2::Number ; type::Symbol=:def, ϵ1::Number=1.0 , ϵ2::Number=1.0 )
+    TwoWavelengthRatioPyrometer( λ::NTuple{2 , <:Number} ; type::Symbol=:def, ϵ1::Number=1.0 , ϵ2::Number=1.0)
+# Examples
+```julia
+# Two-color pyrometer for 2.0 and  4.5 μm wavelength
+p_band = TwoWavelengthRatioPyrometer(2.0 , 4.5 , ϵ1=0.9 , e2 = 0.5)
+```
 """
 const TwoWavelengthRatioPyrometer = RatioPyrometer{2 , T , DT} where {T , DT <: Number}
 """
     TwoBandsRatioPyrometer
 
-Type alias for a ratio pyrometer measuring the quotient of signals across **two distinct spectral bands**. 
-The underlying spectral coordinate type `DT` is expected to be a subtype of `Tuple` containing pairs of band edges.
+Two bands spectral ratio pyrometer, working on two wide spectral bands 
+    
+# Fields
+- `type::Symbol`: A unique identifier or descriptive name for the pyrometer model.
+- `λ1::NTuple{2, <:Number}`: First band
+- `λ1::NTuple{2, <:Number}`: Second band
+- `ϵ1::Base.RefValue{T}`: First band emissivity.
+- `ϵ2::Base.RefValue{T}`: Second band emissivity.
+
+# Constructors
+    TwoBandsRatioPyrometer(λ1::NTuple{2 , <:Number} , λ2::NTuple{2 , <:Number} ; type::Symbol=:def, ϵ::Number=1.0)
+# Examples
+```julia
+# Spectral band pyrometer for 2.0 - 4.5 μm spectral band 
+p_band = SpectralBandPyrometer((2.0 , 4.5) , (7.0 , 9.1) , ϵ1 = 0.4 , ϵ2 = 0.93)
+```
 """
 const TwoBandsRatioPyrometer = RatioPyrometer{2 , T , DT} where {T , DT <: Tuple}
 
 # Constructor for TwoWavelengthRatioPyrometer (discrete wavelengths)
-function TwoWavelengthRatioPyrometer(λ1::Number, λ2::Number; type::Symbol=:def, ϵ1::Number=1.0, ϵ2::Number=1.0)
-    return RatioPyrometer((λ1, λ2); type=type, ϵ1=ϵ1, ϵ2=ϵ2)
-end
+TwoWavelengthRatioPyrometer(λ1::Number, λ2::Number; type::Symbol=:def, ϵ1::Number=1.0, ϵ2::Number=1.0) = RatioPyrometer((λ1, λ2); type=type, ϵ1=ϵ1, ϵ2=ϵ2)
+
+TwoWavelengthRatioPyrometer(λ::NTuple{2 , D}; type::Symbol=:def, ϵ1::Number=1.0, ϵ2::Number=1.0) where D<: Number = RatioPyrometer(λ; type=type, ϵ1=ϵ1, ϵ2=ϵ2)
 
 # Constructor for TwoBandsRatioPyrometer (integrated spectral bands)
-function TwoBandsRatioPyrometer(band1::NTuple{2, <:Number}, band2::NTuple{2, <:Number}; 
-                               type::Symbol=:def, ϵ1::Number=1.0, ϵ2::Number=1.0)
+TwoBandsRatioPyrometer(band1::NTuple{2, <:Number}, band2::NTuple{2, <:Number}; 
+                               type::Symbol=:def, ϵ1::Number=1.0, 
+                               ϵ2::Number=1.0) = RatioPyrometer((band1, band2); type=type, ϵ1=ϵ1, ϵ2=ϵ2)
 
-    return RatioPyrometer((band1, band2); type=type, ϵ1=ϵ1, ϵ2=ϵ2)
-end
     """
     wlength(::Pyrometer{N}) where N
 
-Returns the number of wavelengths
+Returns the number of wavelengths 
 """
 wlength(::Pyrometer{N}) where N = N
-is_spectral_band(::AbstractPyrometer)  = false
-    """
-    is_spectral_band(p::Pyrometer)
-
-True if pyrometer `p` is a spectral-band pyrometer (works on a fixed wavelengh region)
 """
+    is_spectral_band(p::AbstractPyrometer)
+
+True if `p` wprks in spectral band (not at single wavelength(s))
+"""
+is_spectral_band(::AbstractPyrometer)  = false
 is_spectral_band(::SpectralBandPyrometer)  = true
 is_spectral_band(::TwoBandsRatioPyrometer) = true
 """
     is_single_wavelength(::Pyrometer{N}) where N
 
-True if Pyrometer is a single wavelength
+True if the Pyrometer is a single wavelength or two-color
 """
-is_single_wavelength(::SingleWavelengthPyrometer) = true
-is_single_wavelength(::TwoWavelengthRatioPyrometer)  = true
-is_single_wavelength(::AbstractPyrometer) = false
+is_single_wavelength(p::AbstractPyrometer) = ~is_spectral_band(p)
 
 is_spectral_ratio(::AbstractPyrometer) = false 
 is_spectral_ratio(::RatioPyrometer) = true
@@ -284,12 +364,6 @@ function measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: 
 
     Dₜpyro(p::AbstractPyrometer , i , t) = _Dₜpyro(p.λ , i , t , _get_epsilon_equivalent(p))
 
-    # there can be three different cases first the esmissivity is fixed (once calculated integral emissivity)
-    # second , the emissiivity depends on wavelength and provided as an interpolation 
-    # (must be provided as an external argument to measure)
-    # 3.) - the emissivity is both wavelength and temperature dependent , then it should be provided as 
-    # a function of two arguments e(λ , t)  - wavelength and temperature 
-
     _get_epsilon_equivalent(p::Pyrometer)  = p.ϵ[]
 
     _get_epsilon_equivalent(p::RatioPyrometer)  = e_slope(p)
@@ -301,9 +375,9 @@ function measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: 
     # radiation pyrometry for single wavelength
     _Dₜpyro(λ::SVector{1} , i , t  , ϵ) = _to_halley(Planck.Dₜibb(λ[] , t)  , i , ϵ) 
     # spectral ratio pyrometers (single wavelengh)
-    _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Number = _to_halley(Planck.Dₜspectral_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
+    _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Number = _to_halley(Planck.Dₜspectral_ratio(λ[1] , λ[2] , t )  , i , e_slope) 
     # spectral ratio band pyrometer 
-    _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Tuple = _to_halley(Planck.Dₜspectral_band_ratio(λ[1] , λ[2] , t , e_slope = 1.0)  , i , e_slope) 
+    _Dₜpyro(λ::NTuple{2 , T} , i , t  , e_slope) where T <: Tuple = _to_halley(Planck.Dₜspectral_band_ratio(λ[1] , λ[2] , t )  , i , e_slope) 
     """
     _to_halley(tpl , i , ϵ)
 
@@ -314,12 +388,17 @@ _to_halley(tpl , i , ϵ) = begin
         iim = (ϵ *bp - i)
         return ( iim ,  iim / (ϵ * bpd) , bpd/bpdd)
     end
+_to_halley(tpl , i ) = begin 
+        (bp , bpd , bpdd) = (tpl[1] , tpl[2] , tpl[3])
+        iim = (bp - i)
+        return ( iim ,  iim / bpd , bpd/bpdd)
+    end    
 """
     subrange_view(λ1::Number , λ2::Number , λ::AbstractVector , i::AbstractVector)
 
 Returns view of two vectors based on `λ[ λ1 <= λ <= λ2]` , `λ` must be sorted in ascending order
 """
-function subrange_view(λ1::Number , λ2::Number , e::TabularQuantity{LT , ET}) where {LT , ET}
+function subrange_view(λ1::Number , λ2::Number , e::TabularQuantity)
         (f , l) = extract_subrange_inds(λ1 , λ2 , e.λ)
         if λ1 < first(e.λ) || λ2 > last(e.λ) || f > l
             error("λ range [$(λ1), $(λ2)] goes outside available tabular data bounds [$(first(e.λ)), $(last(e.λ))]")
@@ -328,34 +407,96 @@ function subrange_view(λ1::Number , λ2::Number , e::TabularQuantity{LT , ET}) 
         _l = @view e.λ[f:l]
         return (_l , _i)
 end
+subrange_view(λ1::NTuple{2} , λ2::NTuple{2} , e::TabularQuantity) = begin 
+    (l1 , e1) = subrange_view(λ1[1] , λ1[2] , e::TabularQuantity) 
+    (l2 , e2) = subrange_view(λ2[1] , λ2[2] , e::TabularQuantity) 
+    ( (l1 , l2)
+        , 
+       (e1 , e2)
+    )
+end
 extract_pyrometer_inds(p::SpectralBandPyrometer , λ::AbstractVector ) =    extract_subrange_inds(p.λ[1] , p.λ[2] , λ)
 extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsortedlast( λ , l2))
 """
-    Type wrapper for [`TabularQuantity`](@ref)
+Internal object, which wrapps the measured signal
 """
-struct TabularEmissivityContext{E, L, F}
+abstract type AbstractQuantityContext{L , E , F} end
+"""
+    Type wrapper for [`TabularQuantity`](@ref) which wrapps the measured spectrum
+"""
+struct TabularQuantityContext{ L , E , F} <: AbstractQuantityContext{L , E , F}
     _l::L
     _e::E
     i_measured::F
+    TabularQuantityContext(l1 , l2 , e::TabularQuantity , imeasured::F) where F = begin 
+        (_l , _e) = subrange_view(l1  , l2 , e)
+        new{typeof(_l) , typeof(_e) , F}(_l , _e, imeasured)
+    end
+    TabularQuantityContext(l::NTuple{2 , D} , e::TabularQuantity , imeasured) where D <: Tuple = begin 
+            TabularQuantityContext(l[1] , l[2] , e , imeasured)
+    end
 end
 
-function (ctx::TabularEmissivityContext)(t)
 
-    (f , _)  = Planck.weighted_value(ctx._e, ctx._l, t, Planck.ibb) 
 
-    f -=  ctx.i_measured
-
-    (df , _)= Planck.weighted_value(ctx._e, ctx._l, t, Planck.∇ₜibb) 
-    
-    (dff , ) = Planck.weighted_value(ctx._e, ctx._l, t, Planck.∇²ₜibb) 
-
-    return (f , f/df , df/dff)
+(ctx::TabularQuantityContext)(t) = _to_halley(Planck.Dₜplanck_weighted(ctx._e , ctx._l , t) , ctx.i_measured)
+# this version of wrapper is for the TwoBandsRatioPyrometer
+function (ctx::TabularQuantityContext{L , E})(t) where {L <: Tuple , E <: Tuple}
+    tpl = Planck.Dₜplanck_weighted_ratio(ctx._e[1] , ctx._l[1] ,ctx._e[2] , ctx._l[2] , t )
+    return _to_halley(tpl, ctx.i_measured )
 end
 
-function measure(p::SpectralBandPyrometer , imeasured::Number , ϵ::TabularQuantity; T_starting::Number = 600.0)
-    ctx = TabularEmissivityContext(subrange_view(p.λ[1]  , p.λ[2] , ϵ)..., imeasured)
+function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , imeasured::Number , ϵ::TabularQuantity; T_starting::Number = 600.0)
+    ctx = TabularQuantityContext(p.λ , ϵ , imeasured)
     return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
 end 
+function measure(p::SingleWavelengthPyrometer , imeasured::Number , ϵ::TabularQuantity)
+    e_previous = p.ϵ[]
+    e_new = _local_interpolate(p.λ[] , ϵ.λ , ϵ.i)
+    set_emissivity!(p , e_new)
+    val = p(imeasured)
+    set_emissivity!(p , e_previous)
+    return val
+end
+function measure(p::TwoWavelengthRatioPyrometer , imeasured::Number , ϵ::TabularQuantity)
+    e_previous = p.ϵ[]
+    e_new = _local_interpolate(p.λ[] , ϵ.λ , ϵ.i)
+    set_emissivity!(p , e_new)
+    val = p(imeasured)
+    set_emissivity!(p , e_previous)
+    return val
+end
+
+function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
+                    imeasured::Number , ϵ::AbstractSpectralQuantity; 
+                    T_starting::Number = 600.0)
+
+    ctx = GeneralSpectralQuantityContext(Tuple(p.λ) , ϵ , imeasured)
+    return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
+end 
+
+struct GeneralSpectralQuantityContext{L , E , F} <: AbstractQuantityContext{L , E , F}
+    λ::L
+    e::E
+    i_measured::F
+end
+
+(ctx::AbstractQuantityContext{L})(t) where {L <: NTuple{2 , D}} where D <: Number = _to_halley(Planck.Dₜplanck_weighted(ctx.e ,ctx.λ[1] ,ctx.λ[2], t) , ctx.i_measured)
+# this version of wrapper is for the TwoBandsRatioPyrometer
+function (ctx::AbstractQuantityContext{L})(t) where {L <: NTuple{2 , D} } where D <: NTuple 
+    tpl = Planck.Dₜplanck_weighted_ratio(ctx.e , ctx.λ[1] , ctx.λ[2] , t )
+    return _to_halley(tpl, ctx.i_measured )
+end
+
+
+
+
+
+
+
+
+
+
 """
     stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T; Tenv::Number , ϵ_env::Number ) where {T}
 
@@ -796,7 +937,9 @@ function switch_the_type(λ::Float64)
     Base.show(io::IO, p::TwoWavelengthRatioPyrometer) = print(io, "$(p.type) - type: two wavelength ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
     Base.show(io::IO, p::TwoBandsRatioPyrometer)  = print(io, "$(p.type) - type: two bands ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
     
-    
+    _local_interpolate(l::NTuple{N} ,  λ_nodes::AbstractVector, ϵ_nodes::AbstractVector) where N = ntuple(N) do i
+         _local_interpolate(l[i] , λ_nodes , ϵ_nodes)
+    end
      """
     _local_interpolate(λ_target::Number, λ_nodes::AbstractVector, ϵ_nodes::AbstractVector)
 
