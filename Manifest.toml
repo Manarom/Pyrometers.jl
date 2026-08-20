@@ -2,7 +2,22 @@
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "ab6a638475eb07c73f04f94b20497e6533f7389b"
+project_hash = "456c42173646f50540abfd6214105e661cca08f3"
+
+[[deps.ADTypes]]
+git-tree-sha1 = "5970c86505ae9c07bf5bc521ef2bbbb3849e8b7b"
+uuid = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
+version = "1.23.0"
+
+    [deps.ADTypes.extensions]
+    ADTypesChainRulesCoreExt = "ChainRulesCore"
+    ADTypesConstructionBaseExt = "ConstructionBase"
+    ADTypesEnzymeCoreExt = "EnzymeCore"
+
+    [deps.ADTypes.weakdeps]
+    ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
+    ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
+    EnzymeCore = "f151be2c-9106-41f4-ab19-57ee4f262869"
 
 [[deps.ANSIColoredPrinters]]
 git-tree-sha1 = "574baf8110975760d391c710b6341da1afa48d8c"
@@ -903,10 +918,18 @@ uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
 version = "1.4.0"
 
 [[deps.Pyrometers]]
-deps = ["LinearAlgebra", "OrderedCollections", "PlanckFunctions", "QuadGK", "Roots", "StaticArrays"]
+deps = ["ADTypes", "LinearAlgebra", "OrderedCollections", "PlanckFunctions", "QuadGK", "Roots", "StaticArrays"]
 path = "."
 uuid = "f583effd-a810-4e6b-b1e2-2b4349a685d7"
 version = "1.0.0"
+
+    [deps.Pyrometers.extensions]
+    PyrometersForwardDiffExt = "ForwardDiff"
+    PyrometersZygoteExt = "Zygote"
+
+    [deps.Pyrometers.weakdeps]
+    ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+    Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [[deps.Qt6Base_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "Fontconfig_jll", "Glib_jll", "JLLWrappers", "Libdl", "Libglvnd_jll", "OpenSSL_jll", "Vulkan_Loader_jll", "Xorg_libSM_jll", "Xorg_libXext_jll", "Xorg_libXrender_jll", "Xorg_libxcb_jll", "Xorg_xcb_util_cursor_jll", "Xorg_xcb_util_image_jll", "Xorg_xcb_util_keysyms_jll", "Xorg_xcb_util_renderutil_jll", "Xorg_xcb_util_wm_jll", "Zlib_jll", "libinput_jll", "xkbcommon_jll"]

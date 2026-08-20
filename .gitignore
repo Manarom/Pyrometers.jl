@@ -1,5 +1,5 @@
 #/Manifest*.toml
-/src/debug_script.jl
+#/src/debug_script.jl
 /notebook/Manifest.toml
 /notebook/Project.toml
 *backup*

@@ -5,7 +5,8 @@ module Pyrometers
             StaticArrays,
             OrderedCollections, 
             Roots,
-            QuadGK
+            QuadGK,
+            ADTypes
 
     import  PlanckFunctions as Planck
     
@@ -17,7 +18,10 @@ module Pyrometers
         corrected_temperature,
         integral_emissivity,
         DefaultPyrometersTypes,
-        fit_ϵ! , fit_ϵ
+        fit_ϵ! , fit_ϵ , 
+        Pyrometer , RatioPyrometer , 
+        TabularQuantity , AnalyticalSpectralQuantity ,
+        IsothermalSpectralQuantity , GenericDifferentiableSpectralQuantity
     """
     Default pyrometers types 
 
@@ -205,16 +209,28 @@ p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
     const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
     const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
     """
-        Type wrapper for spectral quantities that  are differentible using 
-    ForwardDiff, the function , must accept two arguments `f(λ , T)`, here 
-    `λ ` - wavelengh, `μm`
-    `T` - temperature , `K`
+        GenericDifferentiableSpectralQuantity(f, backend=AutoForwardDiff())
 
-    If the function is non-differentible with respect to `T` 
+    An AD-backend agnostic wrapper for a temperature- and wavelength-dependent 
+    spectral quantity `f(λ, T)`.
+
+    # Arguments
+    * `f`: The core function `f(λ, T)`.
+    * `backend`: An `ADTypes.AbstractADType` token specifying the preferred 
+    AD framework (e.g., `AutoForwardDiff()`, `AutoZygote()`, `AutoEnzyme()`).
     """
-    struct ForawrdDiffDifferentibleSpectralQuantity{F} <: AbstractSpectralQuantity
+    struct GenericDifferentiableSpectralQuantity{F, B<:AbstractADType} <: AbstractSpectralQuantity
         f::F
+        backend::B
+        GenericDifferentiableSpectralQuantity(f::F , ad_backend_type::B = AutoForwardDiff()) where {F , B <: AbstractADType} = new{F , B}(f , ad_backend_type)
     end
+    """
+    Planck.eval_Dₜ(::GenericDifferentiableSpectralQuantity{F, B}, _, _) where {F, B}
+
+Default implementation of GenericDifferentiableSpectralQuantity returns an error
+"""
+Planck.eval_Dₜ(::GenericDifferentiableSpectralQuantity{F, B} , _ , _) where {F, B} = error("The AD backend $(B) is not loaded in your current session. Please execute `using $(string(B)[5:end])` to activate it.")
+
 """
     SingleWavelengthPyrometer{N, T, DT} <: AbstractPyrometer{N, T}
 
@@ -302,7 +318,7 @@ Two bands spectral ratio pyrometer, working on two wide spectral bands
 # Examples
 ```julia
 # Spectral band pyrometer for 2.0 - 4.5 μm spectral band 
-p_band = SpectralBandPyrometer((2.0 , 4.5) , (7.0 , 9.1) , ϵ1 = 0.4 , ϵ2 = 0.93)
+p_band = TwoBandsRatioPyrometer((2.0 , 4.5) , (7.0 , 9.1) , ϵ1 = 0.4 , ϵ2 = 0.93)
 ```
 """
 const TwoBandsRatioPyrometer = RatioPyrometer{2 , T , DT} where {T , DT <: Tuple}
@@ -352,22 +368,34 @@ $(Planck.units(Planck.band_power)) - for  wide - band pyrometer ,
 # Arguments:
 `p` - pyrometer object
 `i` - measured signal
-(optional)
-`T_starting`  - starting temperature value
+`T`  - temperature
 
 """
-function measure(p::AbstractPyrometer , i::D ; T_starting::T=600.0) where {D <: Number, T <: Number}
+function measure(p::AbstractPyrometer , i::D , T::DT=600.0) where {D <: Number, DT <: Number}
         ϵ = _get_epsilon_equivalent(p)
         λ = p.λ
-        return Roots.find_zero(t -> _Dₜpyro(λ , i , t , ϵ) , T_starting ,  Roots.Halley())  
+        return Roots.find_zero(t -> _Dₜpyro(λ , i , t , ϵ) , T ,  Roots.Halley())  
     end
 
     Dₜpyro(p::AbstractPyrometer , i , t) = _Dₜpyro(p.λ , i , t , _get_epsilon_equivalent(p))
+
+    """
+    _get_epsilon_equivalent(p::AbstractPyrometer)
+
+Returns emissivity equivalent to be used in computations, for partial radiation pyrometers 
+`typeof(p) <: Pyrometer` returns emissivity value , for  `typeof(p) <: RatioPyrometer` gives
+`e-slope` value (two-bands equivalent emissivities ratio )
+"""
+_get_epsilon_equivalent(p::AbstractPyrometer)= error("not implemented")
 
     _get_epsilon_equivalent(p::Pyrometer)  = p.ϵ[]
 
     _get_epsilon_equivalent(p::RatioPyrometer)  = e_slope(p)
 
+    get_emissivity(p::AbstractPyrometer) = error("not implemented")
+    get_emissivity(p::Pyrometer) = p.ϵ[]
+    get_emissivity(p::RatioPyrometer) = (p.ϵ1[] , p.ϵ[])
+    
     (p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i , T_starting = T_starting)
 
     # radiation pyrometer in band 
@@ -399,13 +427,13 @@ _to_halley(tpl , i ) = begin
 Returns view of two vectors based on `λ[ λ1 <= λ <= λ2]` , `λ` must be sorted in ascending order
 """
 function subrange_view(λ1::Number , λ2::Number , e::TabularQuantity)
-        (f , l) = extract_subrange_inds(λ1 , λ2 , e.λ)
-        if λ1 < first(e.λ) || λ2 > last(e.λ) || f > l
-            error("λ range [$(λ1), $(λ2)] goes outside available tabular data bounds [$(first(e.λ)), $(last(e.λ))]")
-        end
-        _i = @view e.i[f:l]
-        _l = @view e.λ[f:l]
-        return (_l , _i)
+    (f , l) = extract_subrange_inds(λ1 , λ2 , e.λ)
+    if λ1 < first(e.λ) || λ2 > last(e.λ) || f > l
+        error("λ range [$(λ1), $(λ2)] goes outside available tabular data bounds [$(first(e.λ)), $(last(e.λ))]")
+    end
+    _i = @view e.i[f:l]
+    _l = @view e.λ[f:l]
+    return (_l , _i)
 end
 subrange_view(λ1::NTuple{2} , λ2::NTuple{2} , e::TabularQuantity) = begin 
     (l1 , e1) = subrange_view(λ1[1] , λ1[2] , e::TabularQuantity) 
@@ -428,15 +456,26 @@ struct TabularQuantityContext{ L , E , F} <: AbstractQuantityContext{L , E , F}
     _l::L
     _e::E
     i_measured::F
-    TabularQuantityContext(l1 , l2 , e::TabularQuantity , imeasured::F) where F = begin 
+# main constructor l1 - number for 
+TabularQuantityContext(l1 , l2 , e::TabularQuantity , imeasured::F) where F = begin 
         (_l , _e) = subrange_view(l1  , l2 , e)
         new{typeof(_l) , typeof(_e) , F}(_l , _e, imeasured)
     end
-    TabularQuantityContext(l::NTuple{2 , D} , e::TabularQuantity , imeasured) where D <: Tuple = begin 
+    """
+    TabularQuantityContext(l::NTuple{2 , D} , e::TabularQuantity , imeasured) where D <: Tuple
+
+version of constructor with input wavelength for two-band ratio pyrometer 
+"""
+TabularQuantityContext(l::NTuple{2 , D} , e::TabularQuantity , imeasured) where D <: Tuple = begin 
             TabularQuantityContext(l[1] , l[2] , e , imeasured)
     end
 end
+"""
+    TabularQuantityContext(l::StaticArray{Tuple{2}, D, 1},e::TabularQuantity , imeasured) where D <: Number
 
+Additional constructor for spectral-band pyrometer, which stores wavelength as `SVector`
+"""
+TabularQuantityContext(l::StaticArray{Tuple{2}, D, 1},e::TabularQuantity , imeasured) where D <: Number  = TabularQuantityContext(l[1] , l[2] , e , imeasured) 
 
 
 (ctx::TabularQuantityContext)(t) = _to_halley(Planck.Dₜplanck_weighted(ctx._e , ctx._l , t) , ctx.i_measured)
@@ -446,39 +485,54 @@ function (ctx::TabularQuantityContext{L , E})(t) where {L <: Tuple , E <: Tuple}
     return _to_halley(tpl, ctx.i_measured )
 end
 
-function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , imeasured::Number , ϵ::TabularQuantity; T_starting::Number = 600.0)
-    ctx = TabularQuantityContext(p.λ , ϵ , imeasured)
-    return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
-end 
-function measure(p::SingleWavelengthPyrometer , imeasured::Number , ϵ::TabularQuantity)
-    e_previous = p.ϵ[]
-    e_new = _local_interpolate(p.λ[] , ϵ.λ , ϵ.i)
-    set_emissivity!(p , e_new)
-    val = p(imeasured)
-    set_emissivity!(p , e_previous)
-    return val
-end
-function measure(p::TwoWavelengthRatioPyrometer , imeasured::Number , ϵ::TabularQuantity)
-    e_previous = p.ϵ[]
-    e_new = _local_interpolate(p.λ[] , ϵ.λ , ϵ.i)
-    set_emissivity!(p , e_new)
-    val = p(imeasured)
-    set_emissivity!(p , e_previous)
-    return val
-end
+"""
+    measure(p::AbstractPyrometer , imeasured::Number , ϵ::AbstractSpectralQuantity; T_starting::Number = 600.0)
 
+    General function to measure the temperature from the signal `imeasured` taking into account 
+the emissivity provided as [`TabularQuantity`](@ref), [``]
+    
+# Arguments
+- `p`: AbstractPyrometer object 
+
+
+# Examples
+```julia
+# Spectral band pyrometer for 2.0 - 4.5 μm spectral band 
+p_band = SpectralBandPyrometer((2.0 , 4.5) , (7.0 , 9.1) , ϵ1 = 0.4 , ϵ2 = 0.93)
+```
+"""
+measure(p::AbstractPyrometer , imeasured::Number , ϵ::AbstractSpectralQuantity , T::Number = 600.0) = error("not implemented yet")
+ 
+function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , imeasured::Number , ϵ::TabularQuantity, T::Number = 600.0)
+    ctx = TabularQuantityContext(p.λ , ϵ , imeasured)
+    return Roots.find_zero(ctx , T ,  Roots.Halley())
+end 
+function measure(p::Union{SingleWavelengthPyrometer , TwoWavelengthRatioPyrometer} ,
+                imeasured::Number , ϵ::AbstractSpectralQuantity ,  
+                t::Number = 600.0)
+
+    e_previous = get_emissivity(p)
+    e_new = _local_interpolate(p.λ[] , ϵ.λ , ϵ.i)
+    set_emissivity!(p , e_new)
+    val = p(imeasured)
+    set_emissivity!(p , e_previous)
+    return val
+end
+_get_single_wavelength_value(l, _ , e::TabularQuantity) = _local_interpolate(l , e.λ , e.i)
+_get_single_wavelength_value(l::Number, _ , e::TabularQuantity) = _local_interpolate(l , e.λ , e.i)
 function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
                     imeasured::Number , ϵ::AbstractSpectralQuantity; 
                     T_starting::Number = 600.0)
 
-    ctx = GeneralSpectralQuantityContext(Tuple(p.λ) , ϵ , imeasured)
+    ctx = GenericSpectralQuantityContext(Tuple(p.λ) , ϵ , imeasured)
     return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
 end 
 
-struct GeneralSpectralQuantityContext{L , E , F} <: AbstractQuantityContext{L , E , F}
+struct GenericSpectralQuantityContext{L , E , F} <: AbstractQuantityContext{L , E , F}
     λ::L
     e::E
     i_measured::F
+    GenericSpectralQuantityContext(λ::L , quantity::E , i_measured::F) where {L , E , F} = new{L , E , F}(λ , quantity , i_measured)
 end
 
 (ctx::AbstractQuantityContext{L})(t) where {L <: NTuple{2 , D}} where D <: Number = _to_halley(Planck.Dₜplanck_weighted(ctx.e ,ctx.λ[1] ,ctx.λ[2], t) , ctx.i_measured)
@@ -961,86 +1015,5 @@ single point interpolation
         t = (λ_target - λ_start) / (λ_end - λ_start)
         return ϵ_start + t * (ϵ_end - ϵ_start)
     end
-# internal function for trapz integration 
-    """
-    _trapz(x::AbstractVector, y::AbstractVector)
-
-internal function for trapezoidal integration 
-"""
-function _trapz(x::AbstractVector, y::AbstractVector)
-        N = length(x)
-        @assert length(y) == N "Vectors must have the same length"
-        N < 2 && return zero(eltype(y))
-
-        s = zero(promote_type(eltype(x), eltype(y), Float64))
-        
-        @inbounds @simd  for i in 1:(N - 1)
-            Δx = x[i+1] - x[i]
-            ∑y = y[i+1] + y[i]
-            s += Δx * ∑y
-        end
-
-        return s * 0.5
-    end
-    _simpson(x::AbstractRange , y::AbstractVector) =_simpson_even(x , y) 
-    _simpson(x::AbstractVector , y::AbstractVector; is_evenly_spaced::Bool=false) = is_evenly_spaced ? _simpson_even(x , y) : _simpson_uneven(x , y)
-    """
-    _simpson_uneven(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
-
-internal function for Simpson's integration (uneven grids)
-"""
-function _simpson_uneven(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
-            N = length(x)
-            @assert length(y) == N "Vectors must have the same length"
-            N < 3 && return _tranpz(x , y)
-            S = promote_type(TX, TY, Float64)
-            s = zero(S)
-            @inbounds @fastmath @simd for i in 1:2:(N - 2)
-                h0 = x[i+1] - x[i]
-                h1 = x[i+2] - x[i+1]
-                h_sum = h0 + h1
-                
-                c0 = (2 * h0^2 + h0 * h1 - h1^2) / (6 * h0)
-                c1 = (h_sum^3) / (6 * h0 * h1)
-                c2 = (2 * h1^2 + h0 * h1 - h0^2) / (6 * h1)
-                
-                s += c0 * y[i] + c1 * y[i+1] + c2 * y[i+2]
-            end
-            if iseven(N)
-                @inbounds @fastmath s += 0.5 * (x[N] - x[N-1]) * (y[N] + y[N-1])
-            end
-
-            return s
-        end
-        """
-    _simpson_even(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
-
-Simpsons methods for evenly-spaced grids 
-"""
-    function _simpson_even(x::AbstractVector{TX}, y::AbstractVector{TY}) where {TX, TY}
-        N = length(x)
-        @assert length(y) == N "Vectors must have the same length"
-        N < 3 && return _trapz(x, y) 
-
-        S = promote_type(TX, TY, Float64)
-        h = _get_step(x)
-
-        last_simpson_idx = isodd(N) ? (N - 1) : (N - 2)
-
-        s = S(y[begin]) + S(y[last_simpson_idx + 1])
-
-        @inbounds @fastmath @simd for i in 2:last_simpson_idx
-            coef = iseven(i) ? S(4) : S(2)
-            s += coef * y[i]
-        end
-
-        integral_val = s * h / 3
-
-        if iseven(N)
-            @inbounds @fastmath integral_val += 0.5 * h * (y[N-1] + y[N])
-        end
-        return integral_val
-    end
-    _get_step(x::AbstractRange) = step(x)
-    _get_step(x::AbstractVector)  =  x[2] - x[1]
+    include("custom_integration_funcs.jl")
 end
