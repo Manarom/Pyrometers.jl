@@ -157,9 +157,9 @@ p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
         end
     end
 
-    abstract type AbstractQuantity{LT , ET} end
+    abstract type AbstractDiscreteQuantity{LT , ET} end
 """
-    TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractQuantity{LT , ET }
+    TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractDiscreteQuantity{LT , ET }
 
 Type wrapper around discrete 
 
@@ -196,7 +196,7 @@ p_single = Pyrometer(0.65, ϵ=0.85)
 p_band = Pyrometer((2.4, 8.5), type=:mid_ir, ϵ=0.33)
 ```
 """
-    struct TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractQuantity{LT , ET }
+    struct TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractDiscreteQuantity{LT , ET }
         λ::LT
         i::ET
         TabularQuantity(l::LT , e::ET) where {LT <: AbstractVector , ET <: AbstractVector} = begin 
@@ -368,13 +368,13 @@ $(Planck.units(Planck.band_power)) - for  wide - band pyrometer ,
 # Arguments:
 `p` - pyrometer object
 `i` - measured signal
-`T`  - temperature
+`Tstarting`  - temperature hint
 
 """
-function measure(p::AbstractPyrometer , i::D , T::DT=600.0) where {D <: Number, DT <: Number}
+function measure(p::AbstractPyrometer , i::D , Tstarting::DT=600.0) where {D <: Number, DT <: Number}
         ϵ = _get_epsilon_equivalent(p)
         λ = p.λ
-        return Roots.find_zero(t -> _Dₜpyro(λ , i , t , ϵ) , T ,  Roots.Halley())  
+        return Roots.find_zero(t -> _Dₜpyro(λ , i , t , ϵ) , Tstarting ,  Roots.Halley())  
     end
 
     Dₜpyro(p::AbstractPyrometer , i , t) = _Dₜpyro(p.λ , i , t , _get_epsilon_equivalent(p))
@@ -394,9 +394,9 @@ _get_epsilon_equivalent(p::AbstractPyrometer)= error("not implemented")
 
     get_emissivity(p::AbstractPyrometer) = error("not implemented")
     get_emissivity(p::Pyrometer) = p.ϵ[]
-    get_emissivity(p::RatioPyrometer) = (p.ϵ1[] , p.ϵ[])
+    get_emissivity(p::RatioPyrometer) = (p.ϵ1[] , p.ϵ2[])
     
-    (p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i , T_starting = T_starting)
+    (p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i ,  T_starting)
 
     # radiation pyrometer in band 
     _Dₜpyro(λ::SVector{2} , i , t  , ϵ) = _to_halley(Planck.Dₜband_power(t , λₗ = λ[1] , λᵣ = λ[2])  , i , ϵ) 
@@ -445,45 +445,13 @@ subrange_view(λ1::NTuple{2} , λ2::NTuple{2} , e::TabularQuantity) = begin
 end
 extract_pyrometer_inds(p::SpectralBandPyrometer , λ::AbstractVector ) =    extract_subrange_inds(p.λ[1] , p.λ[2] , λ)
 extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsortedlast( λ , l2))
-"""
-Internal object, which wrapps the measured signal
-"""
-abstract type AbstractQuantityContext{L , E , F} end
-"""
-    Type wrapper for [`TabularQuantity`](@ref) which wrapps the measured spectrum
-"""
-struct TabularQuantityContext{ L , E , F} <: AbstractQuantityContext{L , E , F}
-    _l::L
-    _e::E
-    i_measured::F
-# main constructor l1 - number for 
-TabularQuantityContext(l1 , l2 , e::TabularQuantity , imeasured::F) where F = begin 
-        (_l , _e) = subrange_view(l1  , l2 , e)
-        new{typeof(_l) , typeof(_e) , F}(_l , _e, imeasured)
-    end
-    """
-    TabularQuantityContext(l::NTuple{2 , D} , e::TabularQuantity , imeasured) where D <: Tuple
 
-version of constructor with input wavelength for two-band ratio pyrometer 
-"""
-TabularQuantityContext(l::NTuple{2 , D} , e::TabularQuantity , imeasured) where D <: Tuple = begin 
-            TabularQuantityContext(l[1] , l[2] , e , imeasured)
-    end
+_get_single_wavelength_value(l, _ , e::TabularQuantity ) = _local_interpolate(l , e.λ , e.i)
+_get_single_wavelength_value(l::Number, t::Number , e::AbstractSpectralQuantity ) = e(l , t)
+_get_single_wavelength_value(l::NTuple{N}, t::Number , e::AbstractSpectralQuantity) where N =ntuple(N) do i 
+      e(l[i] , t)
 end
-"""
-    TabularQuantityContext(l::StaticArray{Tuple{2}, D, 1},e::TabularQuantity , imeasured) where D <: Number
 
-Additional constructor for spectral-band pyrometer, which stores wavelength as `SVector`
-"""
-TabularQuantityContext(l::StaticArray{Tuple{2}, D, 1},e::TabularQuantity , imeasured) where D <: Number  = TabularQuantityContext(l[1] , l[2] , e , imeasured) 
-
-
-(ctx::TabularQuantityContext)(t) = _to_halley(Planck.Dₜplanck_weighted(ctx._e , ctx._l , t) , ctx.i_measured)
-# this version of wrapper is for the TwoBandsRatioPyrometer
-function (ctx::TabularQuantityContext{L , E})(t) where {L <: Tuple , E <: Tuple}
-    tpl = Planck.Dₜplanck_weighted_ratio(ctx._e[1] , ctx._l[1] ,ctx._e[2] , ctx._l[2] , t )
-    return _to_halley(tpl, ctx.i_measured )
-end
 
 """
     measure(p::AbstractPyrometer , imeasured::Number , ϵ::AbstractSpectralQuantity; T_starting::Number = 600.0)
@@ -501,47 +469,101 @@ the emissivity provided as [`TabularQuantity`](@ref), [``]
 p_band = SpectralBandPyrometer((2.0 , 4.5) , (7.0 , 9.1) , ϵ1 = 0.4 , ϵ2 = 0.93)
 ```
 """
-measure(p::AbstractPyrometer , imeasured::Number , ϵ::AbstractSpectralQuantity , T::Number = 600.0) = error("not implemented yet")
- 
-function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , imeasured::Number , ϵ::TabularQuantity, T::Number = 600.0)
-    ctx = TabularQuantityContext(p.λ , ϵ , imeasured)
-    return Roots.find_zero(ctx , T ,  Roots.Halley())
-end 
-function measure(p::Union{SingleWavelengthPyrometer , TwoWavelengthRatioPyrometer} ,
-                imeasured::Number , ϵ::AbstractSpectralQuantity ,  
-                t::Number = 600.0)
-
-    e_previous = get_emissivity(p)
-    e_new = _local_interpolate(p.λ[] , ϵ.λ , ϵ.i)
-    set_emissivity!(p , e_new)
-    val = p(imeasured)
-    set_emissivity!(p , e_previous)
-    return val
-end
-_get_single_wavelength_value(l, _ , e::TabularQuantity) = _local_interpolate(l , e.λ , e.i)
-_get_single_wavelength_value(l::Number, _ , e::TabularQuantity) = _local_interpolate(l , e.λ , e.i)
-function measure(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
-                    imeasured::Number , ϵ::AbstractSpectralQuantity; 
+function measure(p::AbstractPyrometer  , 
+                    imeasured::Number , 
+                    ϵ::Union{AbstractSpectralQuantity , AbstractDiscreteQuantity}; 
                     T_starting::Number = 600.0)
-
-    ctx = GenericSpectralQuantityContext(Tuple(p.λ) , ϵ , imeasured)
+    ctx = GenericSpectralQuantityContext(p , ϵ , imeasured)
     return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
 end 
 
-struct GenericSpectralQuantityContext{L , E , F} <: AbstractQuantityContext{L , E , F}
+struct GenericSpectralQuantityContext{L , E , F , P} 
     λ::L
     e::E
     i_measured::F
-    GenericSpectralQuantityContext(λ::L , quantity::E , i_measured::F) where {L , E , F} = new{L , E , F}(λ , quantity , i_measured)
+    p::P
+    function GenericSpectralQuantityContext(p::P , quantity::E , i_measured::F) where { E , F , P<:AbstractPyrometer} 
+        _λ, _e = _prepare_context_data(p, quantity)
+        return new{typeof(_λ), typeof(_e), F, P}(_λ, _e, i_measured, p)
+    end
+end
+@inline function _prepare_context_data(p::AbstractPyrometer, quantity::AbstractSpectralQuantity)
+    return Tuple(p.λ), quantity
+end
+function _prepare_context_data(p::Union{SpectralBandPyrometer, TwoBandsRatioPyrometer}, quantity::TabularQuantity)
+    l1, l2 = Tuple(p.λ)
+    return subrange_view(l1, l2, quantity) # Возвращает кортеж или пару (_l, _e)
+end
+function _prepare_context_data(p::Union{SingleWavelengthPyrometer , TwoWavelengthRatioPyrometer}, 
+                            quantity::TabularQuantity)
+    _l = p.λ[]
+    _e = _get_single_wavelength_value(_l, nothing, quantity)
+    return _l, _e
+end
+#GenericSpectralQuantityContext(p::P , quantity::TabularQuantity , i_measured::F) = TabularQuantityContext(p , quantity , i_measured)
+const TabularQuantityContext{L , E , F , P} = GenericSpectralQuantityContext{L , E , F , P} where E <: AbstractVector
+# SpectralBandPyrometer <=> ctx.e <: Planck.AbstractSpectralQuantity
+function (ctx::GenericSpectralQuantityContext{L , E})(t) where {L <: NTuple{2 , D} , 
+                                                            E <: AbstractSpectralQuantity} where D <: Number 
+
+    _to_halley(Planck.Dₜplanck_weighted(ctx.e , ctx.λ[1] ,ctx.λ[2], t) , ctx.i_measured) # 
+end
+# SpectralBandPyrometer <=> ctx.e <: TabularQuantity
+function (ctx::GenericSpectralQuantityContext{L , E})(t) where {L <: AbstractVector , 
+                                                                    E <: AbstractVector}
+    _to_halley(Planck.Dₜplanck_weighted(ctx.e ,ctx.λ , t) , ctx.i_measured) # discrete integrator 
 end
 
-(ctx::AbstractQuantityContext{L})(t) where {L <: NTuple{2 , D}} where D <: Number = _to_halley(Planck.Dₜplanck_weighted(ctx.e ,ctx.λ[1] ,ctx.λ[2], t) , ctx.i_measured)
-# this version of wrapper is for the TwoBandsRatioPyrometer
-function (ctx::AbstractQuantityContext{L})(t) where {L <: NTuple{2 , D} } where D <: NTuple 
+
+function (ctx::GenericSpectralQuantityContext{<:Number, <: Number , <:Any , P})(t) where { P <: SingleWavelengthPyrometer} 
+    return _to_halley(
+        Planck.Dₜibb(ctx.λ , t) , ctx.i_measured, ctx.e
+    )
+end
+function (ctx::GenericSpectralQuantityContext{L, E , F  , P})(t) where {L , E <: AbstractSpectralQuantity , F , P <: SingleWavelengthPyrometer}
+    l = first(ctx.λ)
+    (i , di , ddi)  = Planck.Dₜibb(l , t)
+    (e , de , dde) = Planck.eval_Dₜ(ctx.e , l , t)
+    return _to_halley((
+                        e * i, 
+                        di * e + de * i , 
+                        ddi * e + 2di*de + dde * i 
+                    )
+                    ,
+                    ctx.i_measured)
+end
+# two-bands-ratio abstract continuous 
+function (ctx::GenericSpectralQuantityContext{L , E})(t) where {L <: NTuple{2 , D}  , E <: AbstractSpectralQuantity} where D <: Tuple 
     tpl = Planck.Dₜplanck_weighted_ratio(ctx.e , ctx.λ[1] , ctx.λ[2] , t )
     return _to_halley(tpl, ctx.i_measured )
 end
+function (ctx::GenericSpectralQuantityContext{L , E})(t) where {L <: Tuple{D , D} , E <: Tuple{Q,Q} } where {D <: AbstractVector , Q<: AbstractVector}
+    tpl = Planck.Dₜplanck_weighted_ratio(ctx.e[1] , ctx.λ[1] , ctx.e[2] , ctx.λ[2] , t )
+    return _to_halley(tpl , ctx.i_measured )
+end
 
+
+
+# this version of wrapper is for the TwoBandsRatioPyrometer
+
+
+function (ctx::GenericSpectralQuantityContext{L, E})(t) where {L <: Tuple{Number, Number}, E <: Tuple{Number, Number}}
+    ratio_constant = ctx.e[1] / ctx.e[2]
+    return _to_halley(Planck.Dₜspectral_ratio(ctx.λ[1], ctx.λ[2], t), ctx.i_measured, ratio_constant)
+end
+#=
+(ctx::TabularQuantityContext{L})(t) where L <: AbstractVector = _to_halley(Planck.Dₜplanck_weighted(ctx._e , ctx._l , t) , ctx.i_measured)
+# this version of wrapper is for the TwoBandsRatioPyrometer
+function (ctx::TabularQuantityContext{L})(t) where {L <: Tuple{D , D} } where D <: AbstractVector
+    tpl = Planck.Dₜplanck_weighted_ratio(ctx._e[1] , ctx._l[1] ,ctx._e[2] , ctx._l[2] , t )
+    return _to_halley(tpl, ctx.i_measured )
+end
+(ctx::TabularQuantityContext{L})(t) where L <: Number = _to_halley(
+        Planck.Dₜibb(ctx._l , t) , ctx.i_measured , ctx._e
+)
+(ctx::TabularQuantityContext{L})(t) where L <: Tuple{D,D} where {D <:Number} = _to_halley(
+        Planck.Dₜspectral_ratio(ctx._l[1] , ctx.l[2], t) , ctx.i_measured , ctx._e[1]/ctx._e[2]
+)=#
 
 
 
