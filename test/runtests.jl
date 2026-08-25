@@ -4,6 +4,8 @@ using Test
 
 
 const pl_fun = PlanckFunctions.ibb
+const ratio_fun = PlanckFunctions.spectral_ratio
+eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
 
 @testset "Pyrometers.jl" begin
     p_vector = Pyrometers.produce_pyrometers() # creating all default pyrometers vector
@@ -69,26 +71,55 @@ const pl_fun = PlanckFunctions.ibb
 
     eps_tuple = (eps_tabular , eps_isothermal , eps_analyt , eps_fdiffed)
     for (e , i , i_s) in zip( eps_tuple , imeasure_tuple , i_singl_tup   )
-        @show typeof(e)
+        println("Band  and single-wavelength on $(nameof(typeof(e)))")
         @test Pyrometers.measure(pyr_band , i , e) ≈ Treal
+        @test Pyrometers.signal(pyr_band , Treal  , e) ≈ i
         @test Pyrometers.measure(pyr_single , i_s , e) ≈ Treal
+        @test Pyrometers.signal(pyr_single , Treal  , e) ≈ i_s
     end
+
+    #ratio pyrometer 
     band1 = (2.0 , 3.0)
     band2 = (4.0 , 5.0)
+    l_1 , l_2 = sum(band1)/2 , sum(band2)/2 
     p_band_ratio = Pyrometers.TwoBandsRatioPyrometer(band1 , band2)
+    pyr_single_ratio = Pyrometers.TwoWavelengthRatioPyrometer(l_1 , l_2)
     ((l_v1 , l_v2) ,  (a_v1 , a_v2)) = Pyrometers.subrange_view(band1 , band2 , eps_tabular)
 
     measured_band_ratio = (Pyrometers.Planck.planck_weighted_ratio(a_v1 , l_v1 , a_v2 , l_v2 , Treal ) , 
                         Pyrometers.Planck.planck_weighted_ratio(eps_isothermal , band1 , band2 , Treal ) ,
                         Pyrometers.Planck.planck_weighted_ratio(eps_analyt , band1 , band2 , Treal ),
-                        Pyrometers.Planck.planck_weighted_ratio(eps_fdiffed , band1 , band2 , Treal ))                    
-    for (e , i , i_s) in zip( eps_tuple , measured_band_ratio , i_singl_tup   )
-        @show typeof(e)
+                        Pyrometers.Planck.planck_weighted_ratio(eps_fdiffed , band1 , band2 , Treal ))     
+    measured_single_ratio = [ 
+        ratio_fun(l_1 , l_2 , Treal) * a_fun(l_1)/a_fun(l_2),
+        ratio_fun(l_1 , l_2 , Treal) * eps_ratio_fun(eps_isothermal , l_1 , l_2 , Treal),
+        ratio_fun(l_1 , l_2 , Treal) * eps_ratio_fun(eps_analyt , l_1 , l_2 , Treal),
+        ratio_fun(l_1 , l_2 , Treal) * eps_ratio_fun(eps_fdiffed , l_1 , l_2 , Treal),
+    ]               
+    for (e , i , i_s) in zip( eps_tuple , measured_band_ratio , measured_single_ratio   )
+        println(" Ratio and band-ratio pyrometers on $(nameof(typeof(e)))")
         @test Pyrometers.measure(p_band_ratio , i , e) ≈ Treal
-        #@test Pyrometers.measure(pyr_single , i_s , e) ≈ Treal
+        @test Pyrometers.signal(p_band_ratio , Treal, e) ≈ i 
+        @test Pyrometers.measure(pyr_single_ratio , i_s , e) ≈ Treal
+        @test Pyrometers.signal(pyr_single_ratio , Treal , e) ≈ i_s
     end
+    # testing the convetr temperature function 
+    eps_test = Pyrometers.AnalyticalSpectralQuantity((l , t)-> l + t + t^2  , 
+                            (l , t)-> 1 + 2t  , 
+                            (l , t)-> 2 )
+    
+    pyrs = (pyr_band , pyr_single , p_band_ratio , pyr_single_ratio)
 
+    i_test = [ first(quadgk(l->eps_analyt(l , Treal)*pl_fun(l , Treal) , l_left , l_right)),
+                    eps_analyt(l_single , Treal) * pl_fun(l_single , Treal) ,
+                    Pyrometers.Planck.planck_weighted_ratio(eps_analyt , band1 , band2 , Treal ), 
+                    ratio_fun(l_1 , l_2 , Treal) * eps_ratio_fun(eps_analyt , l_1 , l_2 , Treal)
+                ]
 
+    t_test  = [ p(i , eps_test)  for (p,i) in zip(pyrs , i_test)]
+    for (p,t) in zip(pyrs , t_test)
+        @test Pyrometers.convert_temperature(p , t , eps_test , eps_analyt) ≈ Treal
+    end
 
 
 
