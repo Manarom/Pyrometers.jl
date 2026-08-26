@@ -121,8 +121,29 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
         @test Pyrometers.convert_temperature(p , t , eps_test , eps_analyt) ≈ Treal
     end
 
+    #testing stray radiation exclution 
+    b_i = Pyrometers.Planck.∫ₗ(Pyrometers.Planck.ibb , 2.0 , 3.0)
+    
+    T_true = 1200.0  # true temperature of the surface 
+    T_src  = 1500.0  # furnace temperature 
+    ϵ_src  = 0.85    # furnace emissivity 
+    ϵ_surf = 0.7     # surface emissivity 
+    i_f(e) = e * b_i(T_true) + (1 - e)*b_i(T_src)
+    p = Pyrometers.SpectralBandPyrometer(2.0,3.0, ϵ=ϵ_surf) 
 
+    geom_enc = Pyrometers.EnclosureGeometry()
+    e_eff = Pyrometers.effective_emissivity(geom_enc, ϵ_surf, ϵ_src)
+    @test e_eff == ϵ_surf
+    T_measured = p(i_f(ϵ_surf))
+    
+    T_recovered= Pyrometers.stray_radiation_corrected_temperature(p, T_measured, T_src , ϵ_src , geom_enc)
+    @test T_recovered ≈ T_true
 
+    geom = Pyrometers.ViewFactorGeometry(1.0)
+    e_eff = Pyrometers.effective_emissivity(geom, ϵ_surf, ϵ_src)
+    T_meas = p(i_f(e_eff))
+    T_true_par = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, T_src, ϵ_src, geom)
+    @test T_true_par ≈ T_true
 
 end
 

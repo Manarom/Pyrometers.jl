@@ -236,12 +236,13 @@ Type wrapper around discrete quantity with two columns `λ` and `i`
     const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
     const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
     
+    (p::Planck.IsothermalSpectralQuantity)(λ) = p(λ , nothing)
     get_single_wavelength_value(l::Number, t::Number , e::AbstractSpectralQuantity ) = e(l , t)
     get_single_wavelength_value(l::NTuple{N}, t::Number , e::AbstractSpectralQuantity) where N =ntuple(N) do i 
         e(l[i] , t)
     end
-    integrate(l1::Number , l2::Number , t::Number ,  e::AbstractSpectralQuantity) =(l1 != l2) ? first(quadgk(l->e(l , t) , l1 , l2)) : e(l1 , t)
-    integrate(l1::Number , l2::Number  ,  e::IsothermalSpectralQuantity) = (l1 != l2) ? first(quadgk(l->e(l , nothing) , l1 , l2)) : e(l1 , nothing)
+    integrate(l1::Number , l2::Number , t::Number ,  e::AbstractSpectralQuantity) =first(quadgk(Base.Fix2(e , t) , l1 , l2)) 
+    integrate(l1::Number , l2::Number  ,  e::IsothermalSpectralQuantity) = first(quadgk(e , l1 , l2)) 
 
     const AbstractContinuousOrDiscreteQuantity = Union{AbstractSpectralQuantity , AbstractDiscreteQuantity}
     """
@@ -281,7 +282,6 @@ Type single -wavelengh pyrometer system.
 
 # Constructors
     SingleWavelengthPyrometer(λ::Number; type::Symbol=:def, ϵ::Number=1.0)
-
 # Examples
 ```julia
 # Single-wavelength pyrometer (0.85 μm)
@@ -414,15 +414,21 @@ function measure(p::AbstractPyrometer , i::D ; T_starting::DT=1000.0) where {D <
         λ = p.λ
         return Roots.find_zero(t -> _Dₜpyro(λ , i , t , ϵ) , T_starting ,  Roots.Halley())  
     end
-function measure(p::AbstractPyrometer , i::D  , ϵ::Union{Number , NTuple{2}}; T_starting::DT=600.0) where {D <: Number, DT <: Number}
+measure(p::AbstractPyrometer , i::Union{IsothermalSpectralQuantity , AbstractDiscreteQuantity}; 
+                    T_starting::Number = 1000.0) = measure(p , integrate(p , i) , T_starting = T_starting)
+
+measure(p::AbstractPyrometer , i::AbstractContinuousOrDiscreteQuantity,
+                        radiation_temperature::Number; 
+                        T_starting::Number = 1000.0) = measure(p , integrate(p , radiation_temperature ,  i) , T_starting = T_starting)
+
+function measure(p::AbstractPyrometer , i::D  , ϵ::Union{Number , NTuple{2}}; T_starting::DT = 1000.0) where {D <: Number, DT <: Number}
         _ϵ = _get_epsilon_equivalent(p)
         set_emissivity!(p , ϵ)
         t = measure(p , i ; T_starting=T_starting)
         set_emissivity!(p , _ϵ)
         return t
     end
-(p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i ;  T_starting = T_starting)
-(p::AbstractPyrometer)(i  , ϵ::Union{Number , NTuple{2}}; T_starting::Number=1000.0) = measure(p , i  , ϵ ;  T_starting = T_starting)
+
 Dₜpyro(p::AbstractPyrometer , i , t) = _Dₜpyro(p.λ , i , t , _get_epsilon_equivalent(p))
 
     """
@@ -505,10 +511,67 @@ measure(p::AbstractPyrometer , i::AbstractContinuousOrDiscreteQuantity , radiati
                     ϵ::AbstractContinuousOrDiscreteQuantity; 
                     T_starting::Number = 600.0) = measure(p , integrate(p , radiation_temperature , i) , ϵ , T_starting = T_starting)
 
-(p::AbstractPyrometer)(imeasured, 
-                    ϵ::AbstractContinuousOrDiscreteQuantity; T_starting = 600.0) = measure(p , imeasured,  ϵ; T_starting = T_starting)
+## functors 
 
-(p::AbstractPyrometer)(i::AbstractContinuousOrDiscreteQuantity , radiation_temperature::Number , 
+"""
+    (p::AbstractPyrometer)(i; T_starting::Number=1000.0)
+
+Various versions of pyrometers calling to get the measured temperature from external radiation 
+
+Surface emissivity is taken from pyrometer 
+
+`p(i::Number) ` - intensity provided as a single number 
+
+`p(i::Union{IsothermalSpectralQuantity , AbstractDiscreteQuantity})` - intensity is provided as temperature independent discrete of continuos quantity 
+
+Surface emissivity is provided externally as a continuous function [`AbstractContinuousOrDiscreteQuantity`](@ref)
+
+`p(i::Number , ϵ::AbstractContinuousOrDiscreteQuantity)` - single number intensity 
+
+`p(i::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity} , ϵ::AbstractContinuousOrDiscreteQuantity)` - continuous or discrete intensity (temperature imdependent)
+
+Surface emissivity , measured intensity (temperature dependent with temperature `radiation_temperature`) is provided as a continuos or discrete quantity 
+
+`p(i::AbstractContinuousOrDiscreteQuantity, 
+    radiation_temperature::Number, 
+    ϵ::AbstractContinuousOrDiscreteQuantity)` - continuous or discrete intensity (temperature imdependent)
+
+    !Important 
+
+    If the intensity is provided as a single number it should be the same quantity as the pyrometer acceps 
+    e.g. if `p` is `TwoBandsRatioPyrometer` the intensity should be the ratio of two integral 
+    (within pyrometer's working range) intensities. Example :
+    ```julia
+        import PlanckFunctions: band_power
+        p = TwoBandsRatioPyrometer((2.0 , 3.0), (4.0 , 5.0))
+        Ttrue = 1200.0
+        i_number = band_power(1200 , λₗ = 2.0 , λᵣ = 3.0)/band_power(1200 , λₗ = 4.0 , λᵣ = 6.0)
+        p(i_number) # returns Ttrue
+        # Pyrometers.Planck (which is PlanckFunctions)
+    ```
+
+    On the opposite side , for continuous intensity (including temperature dependent) 
+    it should be the intensity itself , the procedure of measurements 
+    extracts pyrometer's specific signal from this function internally
+      ```julia
+        import PlanckFunctions: band_power , ibb
+        p = TwoBandsRatioPyrometer((2.0 , 3.0) , (4.0 , 5.0))
+        Ttrue = 1200.0
+        i_iso = IsothermalSpectralQuantity(
+                        Base.Fix2(ibb , Ttrue)
+        ) # wrapper around planck spectral intensity (not spectral ratio)
+
+        p(i_iso) # returns Ttrue
+    ```  
+
+"""
+(p::AbstractPyrometer)(i; T_starting::Number=1000.0) = measure(p , i ;  T_starting = T_starting)
+(p::AbstractPyrometer)(i  , ϵ::Union{Number , NTuple{2}}; T_starting::Number=1000.0) = measure(p , i  , ϵ ;  T_starting = T_starting)                    
+(p::AbstractPyrometer)(imeasured, 
+                        ϵ::AbstractContinuousOrDiscreteQuantity; T_starting = 600.0) = measure(p , imeasured,  ϵ; T_starting = T_starting)
+
+(p::AbstractPyrometer)(i::AbstractContinuousOrDiscreteQuantity , 
+                    radiation_temperature::Number , 
                     ϵ::AbstractContinuousOrDiscreteQuantity; 
                     T_starting::Number = 600.0) = measure(p , i , radiation_temperature , ϵ , T_starting = T_starting)
 
@@ -559,7 +622,8 @@ function (ctx::GenericSpectralQuantityContext{L, E , F  , P})(t) where {L , E <:
     l = first(ctx.λ)
     (i , di , ddi)  = Planck.Dₜibb(l , t)
     (e , de , dde) = Planck.eval_Dₜ(ctx.e , l , t)
-    return _to_halley((
+    return _to_halley(
+                    (
                         e * i, 
                         di * e + de * i , 
                         ddi * e + 2di*de + dde * i 
@@ -663,7 +727,8 @@ convert_temperature(p::AbstractPyrometer , Tmeasured  ,  ϵ_previous::AbstractCo
 
 """
     integrate(p::AbstractPyrometer ,  temperature:: Number , intensity::AbstractContinuousOrDiscreteQuantity) 
-
+    integrate(p::SpectralBandPyrometer , 
+                intensity::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity})
 Converts the input spectral `intensity` given as a discrete set of values for wavelengths `λ`
 to the pyrometer signal.
 
@@ -681,17 +746,8 @@ Returns the quantity, which is equal to the type of pyrometer signal , e.g. if p
 `λ` , `intensity`  (both at the same time) if the intensity is provided as a discrete set of points 
 
 """
-function integrate(p::AbstractPyrometer, intensity::Union{AbstractDiscreteQuantity, IsothermalSpectralQuantity}) 
-    error("Method 'integrate' not implemented for $(typeof(p)) and $(typeof(intensity))") 
-end
-
-function integrate(p::AbstractPyrometer, t::Number, intensity::AbstractContinuousOrDiscreteQuantity) 
-    error("Method 'integrate' with temperature not implemented for $(typeof(p)) and $(typeof(intensity))") 
-end
-
-
 @inline integrate(p::SpectralBandPyrometer , 
-    intensity::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}) = integrate(p.λ[1] , p.λ[2] , intensity)
+                intensity::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}) = integrate(p.λ[1] , p.λ[2] , intensity)
 
 @inline integrate(p::SpectralBandPyrometer , t::Number , 
     intensity::AbstractSpectralQuantity) = integrate(p.λ[1] , p.λ[2] , t , intensity)
@@ -733,7 +789,7 @@ EnclosureGeometry() = ViewFactorGeometry(0.0)
 ParallelGeometry() = ViewFactorGeometry(1.0)  
 
  """
-    effective_emissivity_reflectivity(geometry::AbstractRadiationGeometry, eo::Number, es::Number)
+    effective_emissivity(geometry::AbstractRadiationGeometry, eo::Number, es::Number)
 
 returns effective emissivity 
 """
@@ -798,7 +854,8 @@ function Planck.eval_Dₜ(e_eff::EffectiveEmissivityQuantity , λ , T)
 end
 
 """
-    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T; Tenv::Number , ϵ_env::Number ) where {T}
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+        Tsource::Number , ϵ_src::Number  , geometry::AbstractRadiationGeometry=EnclosureGeometry()) where {T}
 
 Calculate the actual surface temperature by excluding stray radiation reflected to the pyrometers's FOV.
 
@@ -817,25 +874,61 @@ This function:
 # Arguments
 - `p::Pyrometer`: The pyrometer object containing surface emissivity and wavelength parameters.
 - `Tmeasured::Number`: The raw, uncorrected temperature reading from the pyrometer (Kelvins).
-(kwargs)
+- `ϵ_surf::Number` : Surface smissivity
 - `Tenv::Number`: The temperature of the external radiation source or ambient environment (Kelvins).
-- `ϵ_env::Number`: The emissivity of the external radiation source (defaults to 1.0 for a blackbody environment).
+- `ϵ_env::Number`: The emissivity of the external radiation source (defaults to 1.0 for a blackbody environment)
+- `geometry` : Heating geometry , governs the way effective emissivity will be evaluated 
 """
 function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
-        Tsource::Number , ϵ_src::Number  , geometry::AbstractRadiationGeometry=EnclosureGeometry()) where {T}
+                                                    ϵ_surf::Number,
+                                                    Tsource::Number, 
+                                                    ϵ_src::Number,
+                                                    geometry::AbstractRadiationGeometry=EnclosureGeometry()) where {T}
         
-        ϵ_surf = get_emissivity(p)
-        measured_signal = signal(p, Tmeasured) 
-
-        blackbody_source_radiation = signal(p, Tsource, one(ϵ_src))
-        
-        e_eff , r_eff = effective_emissivity_reflectivity(geometry, ϵ_surf, ϵ_src)
-        
+        measured_signal = signal(p, Tmeasured , ϵ_surf)    
+        blackbody_source_radiation = signal(p, Tsource, one(ϵ_src))     
+        e_eff = effective_emissivity(geometry, ϵ_surf, ϵ_src)
+        r_eff   = one(ϵ_surf) - e_eff
         reflected_signal = r_eff * blackbody_source_radiation
         pure_signal = measured_signal - reflected_signal
-    
         return p(pure_signal, e_eff)
     end
+
+"""
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+                                                    source_intensity::Number) where {T}
+
+The irradiance (source_intensity) is provided externally, surface emissivity is taken from the pyrometer 
+geometry is fixed to `EnclosureGeometry` viz `reflection = 1 - pyrometer_emissivity`
+"""
+function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+                                                    source_intensity::Number) where {T}
+
+        ϵ_surf = get_emissivity(p)
+        measured_signal = signal(p, Tmeasured)         
+        r_eff   = one(ϵ_surf) - ϵ_surf
+        reflected_signal = r_eff * source_intensity
+        pure_signal = measured_signal - reflected_signal
+        return p(pure_signal)
+    end
+
+"""
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+                    Tsource::Number ,
+                    ϵ_src::Number  , 
+                    geometry::AbstractRadiationGeometry=EnclosureGeometry()) where {T}
+
+Converts measured temperature `Tmeasured` to actual surface temperature excluding the external source radiation  
+Takes the emissivity from pyrometer the external source is provided by its temperature , emissivity and `geometry` configuration 
+"""
+stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+                    Tsource::Number ,
+                    ϵ_src::Number  , 
+                    geometry::AbstractRadiationGeometry=EnclosureGeometry()) where {T} = stray_radiation_corrected_temperature(p , 
+                                                                                            Tmeasured , get_emissivity(p) , 
+                                                                                            Tsource , ϵ_src , geometry)
+
+
 """
     stray_radiation_corrected_temperature(p::AbstractPyrometer, Tmeasured::T, 
                                 ϵ_surf::AbstractSpectralQuantity,
@@ -907,12 +1000,43 @@ function stray_radiation_corrected_temperature(p::AbstractPyrometer, Tmeasured::
     
         return p(pure_signal, e_eff)
     end
+#=function stray_radiation_corrected_temperature(p::AbstractPyrometer, Tmeasured::T, 
+                                ϵ_surf::AbstractSpectralQuantity,
+                                Tsource::Number , 
+                                ϵ_src::AbstractSpectralQuantity  , 
+                                geometry::AbstractRadiationGeometry=EnclosureGeometry()) where {T}
+        
+        measured_signal = signal(p, Tmeasured , ϵ_surf) 
 
+        e_eff = EffectiveEmissivityQuantity(ϵ_surf, ϵ_src, Tsource, geometry)
+        
+        r_eff = SpectralReflectivity(e_eff)
+        
+        reflected_signal = signal(p, Tsource, r_eff)
 
-function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation_function::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}) where {T}
+        pure_signal = measured_signal - reflected_signal
+    
+        return p(pure_signal, e_eff)
+    end=#
+
+"""
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+            incident_radiation_function::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}) where {T}
+
+The case when external radiation source is provided by its spectrum , e.g. it has no temperature , 
+the emissivity is taken from the pyrometer 
+"""
+function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, 
+            incident_radiation_function::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}) where {T}
+
         return stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, integrate(p  ,  incident_radiation_function))
     end    
 
+"""
+    stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation_function::AbstractSpectralQuantity ,  radiation_temperature::Number ) where {T}
+
+External radiation source is temperature-dependent 
+"""
 function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, incident_radiation_function::AbstractSpectralQuantity ,  radiation_temperature::Number ) where {T}
         return stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::T, integrate(p  , radiation_temperature ,  incident_radiation_function))
     end  
