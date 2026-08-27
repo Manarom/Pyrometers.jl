@@ -232,15 +232,105 @@ Type wrapper around discrete quantity with two columns `λ` and `i`
     end 
 
     
+    # continuous spectral quantities 
     const IsothermalSpectralQuantity = Planck.IsothermalSpectralQuantity 
     const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
     const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
-    
-    (p::Planck.IsothermalSpectralQuantity)(λ) = p(λ , nothing)
     get_single_wavelength_value(l::Number, t::Number , e::AbstractSpectralQuantity ) = e(l , t)
     get_single_wavelength_value(l::NTuple{N}, t::Number , e::AbstractSpectralQuantity) where N =ntuple(N) do i 
         e(l[i] , t)
     end
+
+    const ASQ = Planck.AbstractSpectralQuantity
+    """
+        Wrapper around two AbstractSpectralQuantity or Number product  
+    """
+    struct SpectralQuantitiesProduct{SQ1 , SQ2} <: ASQ
+        e1::SQ1
+        e2::SQ2
+        function SpectralQuantitiesProduct(e1::SP1 , e2::SP2) where {SP1 <:Union{ASQ , Number} ,
+                 SP2 <: ASQ}
+                 return new{SP1 , SP2}(e1 , e2)
+        end   
+        function SpectralQuantitiesProduct(e1::SP1 , e2::SP2) where {SP1 <: ASQ ,
+                 SP2 <: Number}
+                 return new{SP2 , SP1}(e2 , e1) # if there is a product than swapping 
+        end  
+    end    
+    
+
+    (qp::SpectralQuantitiesProduct{<:ASQ , <:ASQ})(λ , t) = qp.e1(λ , t) * qp.e2(λ , t) 
+    (qp::SpectralQuantitiesProduct{<:Number , <:ASQ})(λ , t) = qp.e1* qp.e2(λ , t) 
+
+    function Planck.eval_Dₜ(qp::SpectralQuantitiesProduct{<: ASQ, <:ASQ} , l , t)
+        (e1 , de1 , dde1) = Planck.eval_Dₜ(qp.e1 , l , t)
+        (e2 , de2 , dde2) = Planck.eval_Dₜ(qp.e2 , l , t)
+        return (e1 * e2 , 
+                de1 * e2 + de2 * e1 , 
+                dde1 * e2 + 2 * de1 * de2 + e1 * dde2)
+    end 
+    function Planck.eval_Dₜ(qp::SpectralQuantitiesProduct{<: Number , <:ASQ} , l , t)
+        e1 = qp.e1
+        (e2 , de2 , dde2) = Planck.eval_Dₜ(qp.e2 , l , t)
+        return (e1 * e2 , 
+                de2 * e1 , 
+                e1 * dde2)
+    end    
+    Base.:*(sq1::AbstractSpectralQuantity , sq2::AbstractSpectralQuantity) = SpectralQuantitiesProduct(sq1 , sq2)
+    Base.:*(sq1::Number , sq2::AbstractSpectralQuantity) = SpectralQuantitiesProduct(sq1 , sq2)
+    Base.:*(sq1::AbstractSpectralQuantity , sq2::Number) = SpectralQuantitiesProduct(sq1 , sq2)
+
+    struct SpectralQuantitiesRartio{SQ1 , SQ2} <: AbstractSpectralQuantity
+        e1::SQ1
+        e2::SQ2
+        function SpectralQuantitiesRartio(e1::SP1 , e2::SP2) where {SP1<: AbstractSpectralQuantity ,
+                 SP2 <: AbstractSpectralQuantity}
+                 return new{SP1 , SP2}(e1 , e2)
+        end   
+    end    
+
+    
+    (qp::SpectralQuantitiesRartio)(λ , t) = qp.e1(λ , t) / qp.e2(λ , t) 
+    function Planck.eval_Dₜ(qp::SpectralQuantitiesRartio , l , t)
+        (e1 , de1 , dde1) = Planck.eval_Dₜ(qp.e1 , l , t)
+        (e2 , de2 , dde2) = Planck.eval_Dₜ(qp.e2 , l , t)
+        return (
+                e1 / e2 , 
+                Planck._spectral_ratio_first_derivative(e1 , de1 , e2 , de2), 
+                Planck._spectral_ratio_second_derivative(e1 , de1 , dde1 , e2 , de2 , dde2)
+                )
+    end     
+    Base.:/(sq1::AbstractSpectralQuantity , sq2::AbstractSpectralQuantity) = SpectralQuantitiesRartio(sq1 , sq2)
+
+    struct SpectralQuantitiesSum{S1 , S2} <: AbstractSpectralQuantity
+        e1::S1
+        e2::S2
+        function SpectralQuantitiesSum(e1::SP1 , e2::SP2) where {SP1<: AbstractSpectralQuantity ,
+                 SP2 <: AbstractSpectralQuantity}
+                 return new{SP1 , SP2}(e1 , e2)
+        end   
+    end    
+    (sqs::SpectralQuantitiesSum)(l , t) = sqs.e1(l , t) + sqs.e2(l , t)
+    Planck.eval_Dₜ(sqs::SpectralQuantitiesSum , l , t) = begin 
+        (e1 , de1 , dde1) = Planck.eval_Dₜ(sqs.e1 , l , t)
+        (e2 , de2 , dde2) = Planck.eval_Dₜ(sqs.e2 , l , t)
+        return (e1 + e2 , de1 + de2 , dde1 + dde2)
+    end
+    Base.:+(asq1::ASQ , asq2::ASQ) = SpectralQuantitiesSum(asq1 , asq2)
+
+    struct PlanckEmitter <: AbstractSpectralQuantity   end
+    (::PlanckEmitter)(l , t) = Planck.ibb(l , t)
+    Planck.eval_Dₜ(::PlanckEmitter , l , t) = Planck.Dₜibb(l , t)
+    """
+    fix_temperature(q::AbstractSpectralQuantity , fixed_temperature::Number) -> ::IsothermalSpectralQuantity
+
+Fixes `AbstractSpectralQuantity` temperature converting it to `IsothermalSpectralQuantity`
+"""
+fix_temperature(q::AbstractSpectralQuantity , fixed_temperature::Number) = IsothermalSpectralQuantity(Base.Fix2(q , fixed_temperature))
+
+
+    (p::Planck.IsothermalSpectralQuantity)(λ) = p(λ , nothing)
+   
     integrate(l1::Number , l2::Number , t::Number ,  e::AbstractSpectralQuantity) =first(quadgk(Base.Fix2(e , t) , l1 , l2)) 
     integrate(l1::Number , l2::Number  ,  e::IsothermalSpectralQuantity) = first(quadgk(e , l1 , l2)) 
 

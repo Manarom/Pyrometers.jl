@@ -186,44 +186,52 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
         e_eff = Pyrometers.effective_emissivity(geom, ϵ_surf, ϵ_src)
         T_meas = p(i_f(e_eff))
         T_true_par = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, T_src, ϵ_src, geom)
+        @benchmark Pyrometers.stray_radiation_corrected_temperature($p, $T_meas, $T_src, $ϵ_src, $geom)
         @test T_true_par ≈ T_true
 
         # testing with spectral models
-        ϵ_obj_spec = Pyrometers.AnalyticalSpectralQuantity((λ, t) -> 0.7 - 0.00005 * t , (λ, t) -> - 0.00005   , (λ, t) -> 0.0 )
-        i_incident = Pyrometers.IsothermalSpectralQuantity(
-                    Base.Fix2(pl_fun, T_true)
-
-        )
-        i_full =  Pyrometers.IsothermalSpectralQuantity(
-                    l->ϵ_surf * pl_fun(l , T_true) + (1  - ϵ_surf) * i_incident(l)
-        )
-        T_meas = p(Pyrometers.integrate(p , i_full))
-        # 
-        T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, i_full)
-    
-        @test T_corrected < T_meas # Физический контроль направления коррекции
-
-        # Имитируем падение сложной функции излучения, проверяя диспетчеризацию двух последних методов
-        # Предполагаем, что у вас есть инстансы дискретных или непрерывных величин
-        mock_discrete = TabularQuantity([0.6, 0.7], [5.0, 6.0]) # Пример дискретных точек излучения
-        mock_spectral = GenericDifferentiableSpectralQuantity((λ, t) -> 0.8)
-
-        # Проверяем, что методы коррекции по сырой радиации успешно вызываются и возвращают результат
-        # (Проверка отсутствия MethodError при стыковке с функцией integrate)
-        @test_nowarn stray_radiation_corrected_temperature(p_mono, T_meas, mock_discrete)
-        @test_nowarn stray_radiation_corrected_temperature(p_mono, T_meas, mock_spectral, T_src)
-
-        # Важнейший тест для проверки стабильности типов в критическом пути вычислений
-        ϵ_obj_spec = GenericDifferentiableSpectralQuantity((λ, t) -> 0.7 - 0.00005 * t)
-        ϵ_src_spec = GenericDifferentiableSpectralQuantity((λ, t) -> 0.85)
-        geom = ViewFactorGeometry(0.5)
-
-        # Прогревочный вызов (Warm-up для компиляции JIT)
-        stray_radiation_corrected_temperature(p_mono, T_meas, ϵ_obj_spec, T_src, ϵ_src_spec, geom)
-
-        # Замер аллокаций с помощью BenchmarkTools
-        # Ожидаем строго 0 аллокаций в куче (heap allocations)
-        info = @benchmarkable stray_radiation_corrected_temperature($p_mono, $T_meas, $ϵ_obj_spec, $T_src, $ϵ_src_spec, $geom)
-        res = run(info, samples=3)
+        Tsource = 1500.0 # external source temperature 
+        Tsurface_true = 1200.0 #true surface temperature 
+        ϵ_surf = p.ϵ[]
+        bb = Pyrometers.PlanckEmitter()
+        i_incident = Pyrometers.fix_temperature(bb , 1500.0)
         
-        @test res.allocs == 0
+        i_full = ϵ_surf * bb + (1 - ϵ_surf) * i_incident 
+        i_full_iso = Pyrometers.fix_temperature(i_full , T_true)
+        I_total = Pyrometers.integrate(p , i_full_iso)
+        T_meas = p(I_total) # measured temperature including stray radiation impact
+        # 
+        T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, i_incident) #applying correction 
+
+        @test T_corrected ≈ T_true
+
+        @benchmark Pyrometers.stray_radiation_corrected_temperature($p, $T_meas, $i_incident) 
+
+
+
+        # surface emissivity (temperature and wavelength dependent)
+        ϵ_obj_spec = Pyrometers.AnalyticalSpectralQuantity((λ, t) -> 0.7 - 0.00005 * t , (λ, t) -> - 0.00005   , (λ, t) -> 0.0 )
+        bb = Pyrometers.PlanckEmitter() # blackbody emitter 
+        e_src_fun(l) = 0.8 + l*1e-2 #source emissivity function 
+        e_src =  Pyrometers.IsothermalSpectralQuantity(
+              e_src_fun      
+        )
+        i_source = e_src * bb 
+        i_full_iso = Pyrometers.fix_temperature(i_full , Tsource)
+        
+       
+        T_meas = p(Pyrometers.integrate(p ,  i_full_iso))
+        # 
+        T_corrected = Pyrometers.stray_radiation_corrected_temperature(p , T_meas , i_full_iso)
+    
+        @test T_corrected ≈ T_true 
+        @benchmark Pyrometers.stray_radiation_corrected_temperature($p, $T_meas, $i_full_iso)
+
+  
+        Tsrc = 1500.0
+        ϵ_obj_spec(3.0 , Ttrue)
+        geom = Pyrometers.ViewFactorGeometry(0.7)
+        e_eff = Pyrometers.EffectiveEmissivityQuantity(ϵ_obj_spec , e_src , Tsrc , geom)
+        r_eff = Pyrometers.SpectralReflectivity(e_eff)
+        bb_t_source = Pyrometers.fix_temperature(bb , T)
+        i_source = r_eff * bb 

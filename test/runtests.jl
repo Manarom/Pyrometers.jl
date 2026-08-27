@@ -122,6 +122,8 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
     end
 
     #testing stray radiation exclution 
+    println("Testing stray radiaion correction")
+    # planck function integrator within pyrometer's spectral range 
     b_i = Pyrometers.Planck.∫ₗ(Pyrometers.Planck.ibb , 2.0 , 3.0)
     
     T_true = 1200.0  # true temperature of the surface 
@@ -131,19 +133,39 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
     i_f(e) = e * b_i(T_true) + (1 - e)*b_i(T_src)
     p = Pyrometers.SpectralBandPyrometer(2.0,3.0, ϵ=ϵ_surf) 
 
+    print("Enclosure geometry ,  fixed emissivity and input signal...")
     geom_enc = Pyrometers.EnclosureGeometry()
     e_eff = Pyrometers.effective_emissivity(geom_enc, ϵ_surf, ϵ_src)
     @test e_eff == ϵ_surf
     T_measured = p(i_f(ϵ_surf))
-    
     T_recovered= Pyrometers.stray_radiation_corrected_temperature(p, T_measured, T_src , ϵ_src , geom_enc)
     @test T_recovered ≈ T_true
+    println("ok")
 
+    print("Parallel plates geometry ,  fixed emissivity and input signal...")
     geom = Pyrometers.ViewFactorGeometry(1.0)
     e_eff = Pyrometers.effective_emissivity(geom, ϵ_surf, ϵ_src)
     T_meas = p(i_f(e_eff))
     T_true_par = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, T_src, ϵ_src, geom)
     @test T_true_par ≈ T_true
+    println("ok")
 
+   
+    print("Fixed surface emissivity incident radiation is provided as a function of wavelength...")
+    ϵ_surf = p.ϵ[]
+    bb = Pyrometers.PlanckEmitter()
+    i_incident = Pyrometers.fix_temperature(bb , 1500.0)
+    
+    i_full = ϵ_surf * bb + (1 - ϵ_surf) * i_incident 
+    i_full_iso = Pyrometers.fix_temperature(i_full , T_true)
+    I_total = Pyrometers.integrate(p , i_full_iso)
+    T_meas = p(I_total) # measured temperature including stray radiation impact
+    # the insident radiation is provided as irradiance 
+    T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, i_incident) #applying correction 
+
+    @test T_corrected ≈ T_true
+    println("ok")
+
+    # ϵ_obj_spec = Pyrometers.AnalyticalSpectralQuantity((λ, t) -> 0.7 - 0.00005 * t , (λ, t) -> - 0.00005   , (λ, t) -> 0.0 )
 end
 
