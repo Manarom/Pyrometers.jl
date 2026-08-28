@@ -99,9 +99,9 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
     for (e , i , i_s) in zip( eps_tuple , measured_band_ratio , measured_single_ratio   )
         println(" Ratio and band-ratio pyrometers on $(nameof(typeof(e)))")
         @test Pyrometers.measure(p_band_ratio , i , e) ≈ Treal
-        @test Pyrometers.signal(p_band_ratio , Treal, e) ≈ i 
+        @test Pyrometers.ratio_signal(p_band_ratio , Treal, e) ≈ i 
         @test Pyrometers.measure(pyr_single_ratio , i_s , e) ≈ Treal
-        @test Pyrometers.signal(pyr_single_ratio , Treal , e) ≈ i_s
+        @test Pyrometers.ratio_signal(pyr_single_ratio , Treal , e) ≈ i_s
     end
     # testing the convetr temperature function 
     eps_test = Pyrometers.AnalyticalSpectralQuantity((l , t)-> l + t + t^2  , 

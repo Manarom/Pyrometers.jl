@@ -118,7 +118,7 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
         println("                signal(p_band_ratio , $(e_name))")
         b = @benchmark Pyrometers.measure($p_band_ratio , $i , $e) 
         display(b)
-        @test Pyrometers.signal(p_band_ratio , Treal, e) ≈ i 
+        @test Pyrometers.ratio_signal(p_band_ratio , Treal, e) ≈ i 
          println("                signal(p_band_ratio , $(e_name))")
         b = @benchmark Pyrometers.measure($p_band_ratio , $i , $e) 
         display(b)       
