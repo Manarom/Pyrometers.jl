@@ -15,13 +15,13 @@ module Pyrometers
         TwoBandsRatioPyrometer ,
         TwoWavelengthRatioPyrometer , 
         convert_temperature,
-        corrected_temperature,
         integral_emissivity,
         DefaultPyrometersTypes,
         fit_ϵ! , fit_ϵ , 
         Pyrometer , RatioPyrometer , 
         TabularQuantity , AnalyticalSpectralQuantity ,
-        IsothermalSpectralQuantity , GenericDifferentiableSpectralQuantity
+        IsothermalSpectralQuantity , GenericDifferentiableSpectralQuantity , 
+        stray_radiation_corrected_temperature , PlanckEmitter
     """
     Default pyrometers types 
 
@@ -1200,7 +1200,7 @@ function stray_radiation_corrected_temperature(p::AbstractPyrometer, Tmeasured::
 
 
 
-    
+
     """
     fit_ϵ(p::AbstractPyrometer , Tmeasured::Number , Treal::Number)
 
