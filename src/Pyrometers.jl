@@ -36,7 +36,12 @@ const DefaultPyrometersTypes = OrderedDict(
                     :K => SVector{2}([8.0, 9.0]),
                     :B => SVector{2}([9.1,14.0])
     )
+"""
+    Pyrometer type implements the following methods:
 
+    [``]
+
+"""
     abstract type AbstractPyrometer{N , T} end
 
 """
@@ -1195,10 +1200,85 @@ function stray_radiation_corrected_temperature(p::AbstractPyrometer, Tmeasured::
 
 
 
+"""
+    integral_emissivity(p::AbstractPyrometer , ϵ::AbstractContinuousOrDiscreteQuantity , Tref::Number)
+
+Evaluate the integral emissivity within the pyrometer's working range using external spectral emissivity
+provided as discrete or continuous `ϵ` 
+    
+**`λ` vector must be sorted in ascending order**
+# Arguments
+`p` - pyrometer object 
+`ϵ` - emissivity data
+`Tref` - reference temperature
+# Returns tuple of single or two numbers depending on pyrometer's type 
+E.g.  for [`SpectralBandPyrometer`](@ref) `ϵ_int` is computed as:
+`ϵ_int = ∫ϵ(λ)ibb(λ , Tref)dλ / ∫ibb(λ , Tref)dλ`
+"""
+integral_emissivity(p::AbstractPyrometer , ϵ::AbstractContinuousOrDiscreteQuantity , Tref::Number) = error(" Not specified for p $(typeof(p))")
+integral_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} ,  
+     ϵ::AbstractContinuousOrDiscreteQuantity , Tref::Number) = _pyrometer_band_averaged(p.λ[1] , p.λ[2] , ϵ , Tref)
+
+integral_emissivity(p::Union{SingleWavelengthPyrometer, TwoWavelengthRatioPyrometer} ,   ϵ::AbstractContinuousOrDiscreteQuantity , T_ref::Number) = get_single_wavelength_value(Tuple(p.λ) , T_ref , ϵ)
+
+_pyrometer_band_averaged(λ1::Number , λ2::Number ,   ϵ::AbstractContinuousOrDiscreteQuantity , Tref) = _pyrometer_band_averaged((λ1,) , (λ2,) ,   ϵ , Tref)
+function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N} ,   ϵ::AbstractDiscreteQuantity , Tref) where N
+    ntuple(N) do i
+        ( _l , _e ) = subrange_view(λ1[i] , λ2[i] ,  ϵ)
+        return Planck.planck_averaged(_e , _l , Tref)
+    end
+end
+
+function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func::AbstractSpectralQuantity , Tref) where N
+    ntuple(N) do i
+        l , r = λ1[i] , λ2[i]
+        (emin , emax) = ϵ_func(l) , ϵ_func(r)
+        ϵ_baseline = (emin + emax) / 2 # the idea is to exclude the average value 
+        irem, _ = quadgk(λ -> (ϵ_func(λ , Tref) - ϵ_baseline) * Planck.ibb(λ, Tref), l, r)
+        denom = Planck.band_power(Tref , λₗ = l, λᵣ = r )
+        return (ϵ_baseline * denom + irem)/denom
+    end
+end
 
 
+    """
+    set_emissivity!(p::Pyrometer,em_value)
 
+Setter for spectral emissivity
+"""
+set_emissivity!(p::Pyrometer , em_value::Number) = (p.ϵ[] = em_value)
+set_emissivity!(p::Pyrometer , em_value::NTuple{1}) = (p.ϵ[] = em_value[1])
+"""
+    set_emissivity!(p::RatioPyrometer , em_value::Number)
 
+For spectral ratio pyrometer  `em_value` is the e-slope (emissivities ratio)
+"""
+set_emissivity!(p::RatioPyrometer , em_value::Number) = begin 
+    p.ϵ1[]  = em_value * p.ϵ2[] 
+end
+"""
+    set_emissivity!(p::RatioPyrometer{N , T} , em_value::NTuple{2 , D}) where {D <: Number , N , T}
+
+If emissivity is provided as a tuple it is considered as two emissivities at two spectral ranges of 
+ratio pyrometer
+"""
+set_emissivity!(p::RatioPyrometer{N , T} , em_value::NTuple{2 , D}) where {D <: Number , N , T} = begin 
+    p.ϵ1[]  = T(em_value[1])
+    p.ϵ2[]  = T(em_value[2]) 
+end
+"""
+    set_emissivity!(p::AbstractPyrometer,  ϵ::AbstractContinuousOrDiscreteQuantity , Tref::Number)
+
+Setting the emissivity from external data `ϵ`
+
+# Arguments
+`λ` - wavelength , 
+`ϵ` - spectral emissivity 
+"""
+function set_emissivity!(p::AbstractPyrometer,  ϵ::AbstractContinuousOrDiscreteQuantity , Tref::Number)
+    e_int = integral_emissivity(p ,  λ , ϵ , Tref)
+    set_emissivity!(p , e_int)
+end
 
 
     """
@@ -1215,6 +1295,7 @@ function fit_ϵ(p::AbstractPyrometer , Tmeasured::Number , Treal::Number)
          return _get_epsilon_equivalent(p) * signal(p , Tmeasured)/signal(p , Treal)
     end
 fit_ϵ!(p::AbstractPyrometer , Tmeasured::Number , Treal::Number) = set_emissivity!(p , fit_ϵ(p , Tmeasured , Treal))
+
 
     """
     Base.isless(p1::Pyrometer,p2::Pyrometer)
@@ -1294,132 +1375,7 @@ function produce_pyrometers()
         sort!(pyr_vec) # sorting according to the wavelength increase
         return pyr_vec
     end
-    """
-    set_emissivity!(p::Pyrometer,em_value)
 
-Setter for spectral emissivity
-"""
-set_emissivity!(p::Pyrometer , em_value::Number) = (p.ϵ[] = em_value)
-set_emissivity!(p::Pyrometer , em_value::NTuple{1}) = (p.ϵ[] = em_value[1])
-"""
-    set_emissivity!(p::RatioPyrometer , em_value::Number)
-
-For spectral ratio pyrometer  `em_value` is the e-slope (emissivities ratio)
-"""
-set_emissivity!(p::RatioPyrometer , em_value::Number) = begin 
-    p.ϵ1[]  = em_value * p.ϵ2[] 
-end
-"""
-    set_emissivity!(p::RatioPyrometer{N , T} , em_value::NTuple{2 , D}) where {D <: Number , N , T}
-
-If emissivity is provided as a tuple it is considered as two emissivities at two spectral ranges of 
-ratio pyrometer
-"""
-set_emissivity!(p::RatioPyrometer{N , T} , em_value::NTuple{2 , D}) where {D <: Number , N , T} = begin 
-    p.ϵ1[]  = T(em_value[1])
-    p.ϵ2[]  = T(em_value[2]) 
-end
-"""
-    set_emissivity!(p::AbstractPyrometer; λ::AbstractVector , ϵ::AbstractVector , Tref::Number=1273.15)
-
-Setting the emissivity from experimental data of `ϵ` measured at wavelength `λ`
-
-# Arguments
-`λ` - wavelength , 
-`ϵ` - spectral emissivity 
-"""
-function set_emissivity!(p::AbstractPyrometer; λ::AbstractVector , ϵ::AbstractVector , Tref::Number=1273.15)
-    @assert length(λ) == length(ϵ) " λ::AbstractVector , ϵ::AbstractVector must be of the same length "
-    e_int = integral_emissivity(p ,  λ , ϵ , Tref)
-    set_emissivity!(p , e_int)
-end
-
-"""
-    integral_emissivity(p::SpectralBandPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , Tref::Number)
-
-Evaluate the integral emissivity within the pyrometer's working range using external spectral emissivity
-provided as discrete values `ϵ` for wavelengths `λ`. 
-    
-**`λ` vector must be sorted in ascending order**
-
-# Note
-This discrete version is highly efficient when the number of wavelength points within the pyrometer's 
-working range is small (typically less than 100). For dense spectral datasets (more than 100 points), 
-it is faster to interpolate `ϵ` and evaluate the integral using adaptive numerical integration. 
-See: [`integral_emissivity(p::Union{SpectralBandPyrometer, TwoBandsRatioPyrometer}, ϵ_func, Tref::Number)`](@ref).
-
-# Returns
-`ϵ_int` computed as:
-`ϵ_int = ∫ϵ(λ)ibb(λ , Tref)dλ / ∫ibb(λ , Tref)dλ`
-"""
-function integral_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} ,  λ::AbstractVector , ϵ::AbstractVector , Tref::Number)
-    @assert issorted(λ) "Wavelengths vector must be sorted" 
-    return _pyrometer_band_averaged(p.λ[1] , p.λ[2] , λ , ϵ , Tref)
-end
-
-function integral_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} ,  ϵ_func , Tref::Number)
-    return _pyrometer_band_averaged(p.λ[1] , p.λ[2] ,  ϵ_func , Tref)
-end
-"""
-    integral_temperature_dependent_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
-     ϵ_func , T::Number)
-
-Evaluate the integral emissivity within the pyrometer's working range using external spectral emissivity
-provided as a function of wavelength and temperature `ϵ(λ , T)`. 
-    
-# Returns
-`ϵ_int` computed as:
-`ϵ_int(T) = ∫ϵ(λ , T)ibb(λ , T)dλ / ∫ibb(λ , T)dλ`
-"""
-function integral_temperature_dependent_emissivity(p::Union{SpectralBandPyrometer , TwoBandsRatioPyrometer} , 
-     ϵ_func , T::Number)
-    return _pyrometer_band_temperature_dependent_averaged(p.λ[1] , p.λ[2] ,  ϵ_func , T)
-end
-
-
-integral_emissivity(p::SingleWavelengthPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , _::Number) = (_local_interpolate(p.λ[] , λ , ϵ) , )
-integral_emissivity(p::SingleWavelengthPyrometer , ϵ_func , _::Number) = (ϵ_func(p.λ[]) , )
-integral_emissivity(p::TwoWavelengthRatioPyrometer ,  λ::AbstractVector , ϵ::AbstractVector , _::Number) = (_local_interpolate(p.λ[1] , λ , ϵ) , _local_interpolate(p.λ[2] , λ , ϵ))
-integral_emissivity(p::TwoWavelengthRatioPyrometer , ϵ_func , _::Number)= ϵ_func.(p.λ)
-
-
-_pyrometer_band_averaged(λ1::Number , λ2::Number ,  λ::AbstractVector , ϵ::AbstractVector , Tref) = _pyrometer_band_averaged((λ1,) , (λ2,) ,  λ , ϵ , Tref)
-_pyrometer_band_temperature_dependent_averaged(λ1::Number , λ2::Number ,  ϵ , Tref) = _pyrometer_band_temperature_dependent_averaged((λ1,) , (λ2,) ,   ϵ , Tref)
-
-function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N} ,  λ::AbstractVector , ϵ::AbstractVector , Tref) where N
-    ntuple(N) do i
-        ( _l , _e ) = subrange_view(λ1[i] , λ2[i] , λ , ϵ)
-        return Planck.planck_averaged(_e , _l , Tref)
-    end
-end
-
-# this version to work with the esmissivity as a function/interpoaltion/polynomial
-_pyrometer_band_averaged(λ1::Number, λ2::Number  , ϵ_func , Tref) = _pyrometer_band_averaged((λ1,), (λ2,)  , ϵ_func , Tref)
-function _pyrometer_band_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , Tref) where N
-    ntuple(N) do i
-        l , r = λ1[i] , λ2[i]
-        (emin , emax) = ϵ_func(l) , ϵ_func(r)
-        ϵ_baseline = (emin + emax) / 2 # the idea is to exclude the average value 
-        irem, _ = quadgk(λ -> (ϵ_func(λ) - ϵ_baseline) * Planck.ibb(λ, Tref), l, r)
-        denom = Planck.band_power(Tref , λₗ = l, λᵣ = r )
-        return (ϵ_baseline * denom + irem)/denom
-    end
-end
-"""
-    _pyrometer_band_tdependent_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , ϵ_func , T) where N
-
-Averages if the function is both wl and temperature dependent
-"""
-function _pyrometer_band_temperature_dependent_averaged(λ1::NTuple{N}, λ2::NTuple{N}  , func , T) where N
-    ntuple(N) do i
-        l , r = λ1[i] , λ2[i]
-        (emin , emax) = func(l , T) , func(r , T)
-        ϵ_baseline = (emin + emax) / 2 # the idea is to exclude the average value 
-        irem, _ = quadgk(λ -> (func(λ , T) - ϵ_baseline) * Planck.ibb(λ, T), l, r)
-        denom = Planck.band_power(T , λₗ = l, λᵣ = r )
-        return (ϵ_baseline * denom + irem)/denom
-    end
-end
 
 
     """
@@ -1507,30 +1463,6 @@ function switch_the_type(λ::Float64)
     Base.show(io::IO, p::SpectralBandPyrometer) = print(io, "$(p.type) - type: spectral-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
     Base.show(io::IO, p::TwoWavelengthRatioPyrometer) = print(io, "$(p.type) - type: two wavelength ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
     Base.show(io::IO, p::TwoBandsRatioPyrometer)  = print(io, "$(p.type) - type: two bands ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
-    
-    _local_interpolate(l::NTuple{N} ,  λ_nodes::AbstractVector, ϵ_nodes::AbstractVector) where N = ntuple(N) do i
-         _local_interpolate(l[i] , λ_nodes , ϵ_nodes)
-    end
-     """
-    _local_interpolate(λ_target::Number, λ_nodes::AbstractVector, ϵ_nodes::AbstractVector)
-
-single point interpolation 
-"""
-@inline function _local_interpolate(λ_target::Number, λ_nodes::AbstractVector, ϵ_nodes::AbstractVector)
-       
-        idx = searchsortedfirst(λ_nodes, λ_target)
-        
-        if idx == 1
-            return ϵ_nodes[begin]
-        elseif idx > length(λ_nodes)
-            return ϵ_nodes[end]
-        end
-        
-        λ_start, λ_end = λ_nodes[idx-1], λ_nodes[idx]
-        ϵ_start, ϵ_end = ϵ_nodes[idx-1], ϵ_nodes[idx]
-        
-        t = (λ_target - λ_start) / (λ_end - λ_start)
-        return ϵ_start + t * (ϵ_end - ϵ_start)
-    end
-    include("custom_integration_funcs.jl")
+ 
+    include("custom_integration_and_interpolation_funcs.jl")
 end
