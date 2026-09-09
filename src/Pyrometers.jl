@@ -1102,7 +1102,7 @@ When evaluating temperature derivatives inside Halley's root-finding loop, the s
 # Create a spectral band pyrometer (2.0 - 4.5 μm)
 p = SpectralBandPyrometer(2.0, 4.5)
 
-# Define spectral models for the target object and a constant gray furnace wall
+# Define spectral models for the target object and a temperature-dependent gray furnace wall
 ϵ_object = GenericDifferentiableSpectralQuantity((λ, t) -> 0.6 - 0.0001*t)
 ϵ_wall   = 0.85
 

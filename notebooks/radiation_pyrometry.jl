@@ -28,6 +28,9 @@ begin
 	src_dir = joinpath(abspath(joinpath(notebook_dir,"..")),"src")
 end;
 
+# ╔═╡ 05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
+using BenchmarkTools
+
 # ╔═╡ 30743a02-c643-4bdc-837e-b97299f9520a
 md"""
 #  `Pyrometers.jl` package usage  
@@ -53,18 +56,6 @@ The last line will launch the Pluto starting page in your default browser
 
 # ╔═╡ abdc809b-b53c-4dff-ba6f-c636c73f3fca
 const Planck = Pyrometers.Planck
-
-# ╔═╡ ba23c985-74c4-41f3-8bc4-f7287e30e47f
-#using Revise,StaticArrays,OrderedCollections,Optimization,OptimizationOptimJL,LaTeXStrings,Interpolations,Plots,PlutoUI,DelimitedFiles , ForwardDiff , Roots , QuadGK
-
-# ╔═╡ 9cd8fe6d-dcf9-472e-a019-19b4c1a182ed
-#includet(joinpath(src_dir,"RadiationPyrometers.jl"))
-
-# ╔═╡ 6535717c-99ae-4e8e-94aa-d600f02537ed
-# ╠═╡ disabled = true
-#=╠═╡
- Planck = RadiationPyrometers.Planck
-  ╠═╡ =#
 
 # ╔═╡ 171409eb-22b5-4bc5-a8e2-eac0932a24f3
 PlutoUI.TableOfContents(indent=true, depth=4, aside=true)
@@ -566,64 +557,15 @@ end;
 # ╔═╡ 48b184a0-b1df-461e-a3f5-3c8be72ab875
 md" Select pyrometer type: $(@bind selected_type Select(kvect , default = pyr_smaller_type) )"
 
-# ╔═╡ 10298d52-d411-475f-b7f6-8562ed2a25bc
-if is_recalculate 
-	
-	T1_scan = 273.0:50:1373
-	T2_scan = 1273.0:50:3800
-
-
-	if use_custom
+# ╔═╡ 15429248-3b3e-4912-b4a6-25ed2e8b0ebb
+	begin 
+		if use_custom
 		p_selected = p_custom
 	else
 		p_selected = filter(p->p.type == selected_type , pyrometers_vector2)[]
 	end
-	
-	_is2 = Pyrometers.is_spectral_band(p_selected)
-		# 
-	l = _is2 ? p_selected.λ : [p_selected.λ[]-0.2,p_selected.λ[]+0.2 ]
-	
-	_λ_pyr_interp = _is2 ? collect(range(l...,length=30)) : p_selected.λ
-
-	e_s = eint.(_λ_pyr_interp)
-	e_avg = Pyrometers.integral_emissivity(p_selected , eint , 1273.15)
-	
-	#e_avg = sum(e_s)/length(e_s)
-
-	# setting averaged value of emissivity to pyrometer
-	Pyrometers.set_emissivity!(p_selected, e_avg)
-	
-	# calculating the measured by the pyrometer value 
-	
-	_N = length(T1_scan)
-	_M = length(T2_scan)
-	
-	ΔT_mat = zeros((_M , _N))
-	Tmeas_mat = zeros((_M , _N))
-	
-	 	for j in 1 : _N
-		for i in 1 : _M
-			t1 =  T1_scan[j]
-			t2 = T2_scan[i]
-			i_measured_selected = two_planck.(_λ_pyr_interp , e_s , t1, t2)
-			
-			i_measured_int =  _is2 ? quadgk(l-> two_planck(l , eint(l) , t1, t2) , p_selected.λ[1] , p_selected.λ[2] )[1] : i_measured_selected[]
-
-			t_meas = try 
-					p_selected(i_measured_int)
-				catch 
-					0.0
-			end
-			
-			ΔT_mat[i , j] = (t_meas - t1)/t1
-			Tmeas_mat[i , j] = t_meas
-		end
+		Pyrometers.set_emissivity!(p_selected , 1.0)
 	end
-	
-end
-
-# ╔═╡ fe1b4c33-1be4-46ab-ba70-b58504e169a6
-dfff = quadgk(l-> two_planck(l , eint(l) , 1573 , 1873) , p_selected.λ[1] , p_selected.λ[2])[1]
 
 # ╔═╡ baeafd9c-19bc-4dda-ade2-89b8cf534f88
  begin 
@@ -632,25 +574,64 @@ dfff = quadgk(l-> two_planck(l , eint(l) , 1573 , 1873) , p_selected.λ[1] , p_s
       i = isurface + reflected
  end
 
-# ╔═╡ b82e1650-ff56-45b1-baa1-ebf534400d73
-Pyrometers.integral_emissivity(p_selected , eint , 1573.15)
+# ╔═╡ 1c02bee4-29af-4a5f-8b83-0ee6d5e226be
+begin 
+	struct MixedRadiationEmitter{E , R , PL1 , PL2}
+		e::E
+		r::R
+		pl1::PL1
+		pl2::PL2
+		function MixedRadiationEmitter(e)
+			r = Pyrometers.SpectralReflectivity(e)
+			pl1 = e * Pyrometers.PlanckEmitter()
+			pl2 = r * Pyrometers.PlanckEmitter()
+			new{typeof(e) , typeof(r) , typeof(pl1) , typeof(pl2)}(e , r , pl1 , pl2)
+		end
+	end
+	(em::MixedRadiationEmitter)(l , t1 , t2) = em.pl1(l , t1) + em.pl2.(l , t2)
+end
 
-# ╔═╡ cf6322f0-0802-4261-b78f-a0f97a8ae2ad
-Pyrometers.set_emissivity!(p_selected , Pyrometers.integral_emissivity(p_selected , eint , 1500.0))
+# ╔═╡ e5ec9457-c744-4e47-a42a-e7dddeed13dc
+function fix_second_temperature(me::MixedRadiationEmitter , t)
+	me.pl1 + Pyrometers.fix_temperature(me.pl2 , t)
+end
 
-# ╔═╡ 7450bf72-3a21-4322-995b-36e16e62fd18
-T_measured = p_selected(i)
+# ╔═╡ 10298d52-d411-475f-b7f6-8562ed2a25bc
+if is_recalculate 
+	
+	T_surf_scan = 273.0:50:1373
+	T_heater_scan = 1273.0:50:3800
 
-# ╔═╡ 43576cb6-87d6-4bcc-90bd-a7ab754e1245
-Pyrometers.corrected_temperature(p_selected ,  T_measured , 1873 , 1.0)
+	e_int_iso = Pyrometers.IsothermalSpectralQuantity(eint)
+	em_stray_rad = MixedRadiationEmitter(e_int_iso)
 
-# ╔═╡ ca361b35-22b3-4c8f-a1c2-ca5ffc594eff
-p_selected
+	
+	_N = length(T_surf_scan)
+	_M = length(T_heater_scan)
+	
+	ΔT_mat = zeros((_M , _N))
+	Tmeas_mat = zeros((_M , _N))
+	exclution_error = zeros((_M , _N))
+	
+	 for i in 1 : _M
+		 t2 = T_heater_scan[i]
+		 _a = fix_second_temperature(em_stray_rad , t2) # fixing source temperature returns SpectralQuantity
+		for j in 1 : _N
+			t1 =  T_surf_scan[j]
+			t_meas =  p_selected( _a , t1 ,  e_int_iso )
+			ΔT_mat[i , j] = (t_meas - t1)/t1
+			Tmeas_mat[i , j] = t_meas
+			t_stray_excluded = Pyrometers.stray_radiation_corrected_temperature(p_selected , t_meas , e_int_iso , t2 , 1.0)
+			exclution_error[i , j] = (t_stray_excluded - t1)/t1
+		end
+	end
+	p_selected
+end
 
 # ╔═╡ 0cb50b02-ab41-416c-8610-c3ff318b117b
 if is_recalculate 
 	if is_use_plotly
-		tr2 = PlutoPlotly.surface(x = T2_scan , y = T1_scan, z=100.0 * ΔT_mat, colorscale="Viridis")
+		tr2 = PlutoPlotly.surface(x = T_heater_scan , y = T1_scan, z=100.0 * ΔT_mat, colorscale="Viridis")
 		
 		layout2 = Layout(
     		width=800, 
@@ -666,16 +647,16 @@ if is_recalculate
 		)
 		p_res = PlutoPlotly.plot(tr2 , layout2)
 	else
-		p_res = Plots.surface(T1_scan, T2_scan , 100.0*ΔT_mat )
+		p_res = Plots.surface(T_surf_scan, T_heater_scan , 100.0*ΔT_mat )
 	end
 end
 
 # ╔═╡ 3e19d251-91f6-4383-bfc8-ffe816570f42
 if is_recalculate
 	md"""
-	Tsurface = $(@bind T_surf_selected Select(T1_scan))
+	Tsurface = $(@bind T_surf_selected Select(T_surf_scan))
 	
-	Tlamp = $(@bind T_lamp_selected Select(T2_scan))
+	Tlamp = $(@bind T_lamp_selected Select(T_heater_scan))
 	
 	"""
 end	
@@ -683,31 +664,53 @@ end
 # ╔═╡ ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 if is_recalculate
 
-	j_selected = findfirst(t->t == T_surf_selected , T1_scan)
-	i_selected = findfirst(t->t == T_lamp_selected , T2_scan)
-	md" Tmeas ± ΔT = $( Tmeas_mat[i_selected , j_selected] ) ± $(ΔT_mat[i_selected , j_selected] *  T1_scan[j_selected] )"
+	j_selected = findfirst(t->t == T_surf_selected , T_surf_scan)
+	i_selected = findfirst(t->t == T_lamp_selected , T_heater_scan)
+	md" Tmeas ± ΔT = $( Tmeas_mat[i_selected , j_selected] ) ± $(ΔT_mat[i_selected , j_selected] *  T_surf_scan[j_selected] )"
 end
 
 # ╔═╡ dd1561e2-233f-425a-832f-130b49f0bf0b
 if is_recalculate
-	out_table = vcat(hcat([0.0] , transpose(T1_scan)) , hcat(T2_scan, 100*ΔT_mat))
+	out_table = vcat(hcat([0.0] , transpose(T_surf_scan)) , hcat(T_heater_scan, 100*ΔT_mat))
 	pretty_table(HTML , out_table)
 end
 
 # ╔═╡ 05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 if is_recalculate
-	out_table_T = vcat(hcat([0.0] , transpose(T1_scan)) , hcat(T2_scan, Tmeas_mat))
+	out_table_T = vcat(hcat([0.0] , transpose(T_surf_scan)) , hcat(T_heater_scan, Tmeas_mat))
 	pretty_table(HTML , out_table_T )
 end
+
+# ╔═╡ abf9e80e-49e9-4a35-bc68-bb6c4260fa94
+em1 = MixedRadiationEmitter(e_int_iso)
+
+# ╔═╡ fc3be34a-381b-4735-b201-9479eb43ee43
+em1(2.3 , 1300 , 1800)
+
+# ╔═╡ 2bbe7963-d294-41d3-a308-2a4cf1fddb58
+a = fix_second_temperature(em1 , 1800)
+
+# ╔═╡ c656e557-5654-47a8-b461-dfce564148d2
+@benchmark $p_selected( $a , 1200 )
+
+# ╔═╡ b94fca1d-2416-44ff-9e41-40f876fc6b0e
+T_measured = p_selected( a , 1200.0 ,  e_int_iso ) # 1200 is the true temperature 
+
+# ╔═╡ 92edb9f4-cb2b-4a73-85df-197ec6c1a872
+incident_radiation = Pyrometers.PlanckEmitter()
+
+# ╔═╡ 19236d96-33ab-4495-a7eb-697ff5bb43e5
+Pyrometers.stray_radiation_corrected_temperature(p_selected , T_measured , e_int_iso , 1800.0 , 1.0)
+
+# ╔═╡ 5e64a74b-fe14-4461-871b-6b609b5e83cd
+plot(λ_show , em1.(λ_show , 300 , 2800))
 
 # ╔═╡ Cell order:
 # ╠═30743a02-c643-4bdc-837e-b97299f9520a
 # ╠═5e712312-0fc7-4205-84cc-834d57b814a3
 # ╠═abdc809b-b53c-4dff-ba6f-c636c73f3fca
-# ╠═ba23c985-74c4-41f3-8bc4-f7287e30e47f
-# ╠═9cd8fe6d-dcf9-472e-a019-19b4c1a182ed
-# ╟─6535717c-99ae-4e8e-94aa-d600f02537ed
-# ╟─171409eb-22b5-4bc5-a8e2-eac0932a24f3
+# ╠═05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
+# ╠═171409eb-22b5-4bc5-a8e2-eac0932a24f3
 # ╟─d5ee3913-66be-47d7-a755-699ba64b4f98
 # ╟─d442014a-20e6-4be4-ac7f-f13de329dec5
 # ╟─27b3c586-9eb0-4a51-b9ca-a9c0379fccdf
@@ -747,7 +750,7 @@ end
 # ╟─18daa932-fd3a-4056-aa07-4dcf26c7d57a
 # ╟─36ba2396-bb5e-4d22-a58e-9ab27cd18b2d
 # ╟─91bbd553-4e4a-431d-9d54-b0f4882fd426
-# ╟─15f1519b-d924-4fa9-b212-eebba75c544a
+# ╠═15f1519b-d924-4fa9-b212-eebba75c544a
 # ╟─cd9d9742-e9e6-47b9-afae-09e3018e7ebf
 # ╟─0404bf20-57a4-4c7c-bf23-70d3541a6787
 # ╟─8cef05a1-2974-4c38-b73e-fa706f347fcc
@@ -757,22 +760,27 @@ end
 # ╟─54339700-71fd-48bf-a2ef-0c3267b9d81b
 # ╟─7f76bc22-77c3-4eb3-9d49-588e653df2e7
 # ╟─a0197a9a-34bf-4a3e-af8a-c23ea777f482
-# ╠═7793976e-6714-4bc1-9d97-412dd2a67480
+# ╟─7793976e-6714-4bc1-9d97-412dd2a67480
 # ╠═969907ad-0c38-4dfb-8e2d-ac25619fbe5f
 # ╟─48b184a0-b1df-461e-a3f5-3c8be72ab875
 # ╠═5b647454-e5fc-4c65-8a0a-8eb499955cc1
-# ╠═fe1b4c33-1be4-46ab-ba70-b58504e169a6
-# ╠═baeafd9c-19bc-4dda-ade2-89b8cf534f88
-# ╠═b82e1650-ff56-45b1-baa1-ebf534400d73
-# ╠═cf6322f0-0802-4261-b78f-a0f97a8ae2ad
-# ╠═7450bf72-3a21-4322-995b-36e16e62fd18
-# ╠═43576cb6-87d6-4bcc-90bd-a7ab754e1245
-# ╠═ca361b35-22b3-4c8f-a1c2-ca5ffc594eff
+# ╠═15429248-3b3e-4912-b4a6-25ed2e8b0ebb
+# ╟─baeafd9c-19bc-4dda-ade2-89b8cf534f88
 # ╠═10298d52-d411-475f-b7f6-8562ed2a25bc
-# ╟─c9634225-fa52-4747-8f45-3511141bd164
+# ╠═c656e557-5654-47a8-b461-dfce564148d2
+# ╠═c9634225-fa52-4747-8f45-3511141bd164
 # ╠═0cb50b02-ab41-416c-8610-c3ff318b117b
 # ╟─3e19d251-91f6-4383-bfc8-ffe816570f42
 # ╟─ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 # ╟─dd1561e2-233f-425a-832f-130b49f0bf0b
 # ╟─05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 # ╠═e480137d-b6d9-4e18-92f0-640292bbb5f0
+# ╠═1c02bee4-29af-4a5f-8b83-0ee6d5e226be
+# ╠═e5ec9457-c744-4e47-a42a-e7dddeed13dc
+# ╠═abf9e80e-49e9-4a35-bc68-bb6c4260fa94
+# ╠═fc3be34a-381b-4735-b201-9479eb43ee43
+# ╠═2bbe7963-d294-41d3-a308-2a4cf1fddb58
+# ╠═b94fca1d-2416-44ff-9e41-40f876fc6b0e
+# ╠═92edb9f4-cb2b-4a73-85df-197ec6c1a872
+# ╠═19236d96-33ab-4495-a7eb-697ff5bb43e5
+# ╠═5e64a74b-fe14-4461-871b-6b609b5e83cd
