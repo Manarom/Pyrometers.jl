@@ -19,6 +19,9 @@ end
 # ╔═╡ ba23c985-74c4-41f3-8bc4-f7287e30e47f
 using Revise,StaticArrays,OrderedCollections,Optimization,OptimizationOptimJL,LaTeXStrings,NumericalIntegration,Interpolations,Plots,PlutoUI,DelimitedFiles , ForwardDiff , PlutoPlotly , PrettyTables, JLD2 , Roots , QuadGK , ADTypes , ForwardDiff , StatsBase
 
+# ╔═╡ 4f1397e1-018d-4965-b3e1-78ccac62b54c
+using BenchmarkTools
+
 # ╔═╡ 15a5265e-61bc-440d-9a7d-ff10773b78d8
 using Main.Pyrometers #this line returns not defined error on the first Pluto run (probably, because of the Pluto running all "using"'s before the cells) just re-run this cell manually
 
@@ -696,6 +699,9 @@ end
 # ╔═╡ 0428e504-e163-4945-a2fa-7175e0b33020
 last_column_plot_data
 
+# ╔═╡ ed653f67-2f49-432b-b691-a79f7e1d51e4
+i_test = IsothermalSpectralQuantity(Base.Fix2(lamp_interpolator,240))
+
 # ╔═╡ c9634225-fa52-4747-8f45-3511141bd164
 md""" 
 **Try plotly! : $(@bind is_use_plotly CheckBox(false))**
@@ -902,6 +908,38 @@ begin
 	title!(last_column_plot , Pyrometers.shorthand(p_selected))
 end
 
+# ╔═╡ 831ead94-fd87-4412-80e5-01f557eee355
+begin 
+	T_true = 957.98
+	bb = Pyrometers.PlanckEmitter()
+	e_surf = IsothermalSpectralQuantity(eint)
+	refl = Pyrometers.SpectralReflectivity(e_surf)
+	
+	for u in (120.0 , 160.0 , 180.0 , 200.0 , 240.0)
+		i_test = IsothermalSpectralQuantity(Base.Fix2(lamp_interpolator,u))
+		i_full = e_surf * bb + refl * i_test
+		T_source = p_selected(Pyrometers.fix_temperature( i_test , 1200.0) , e_surf)
+		@show T_source
+		i_fixed = Pyrometers.fix_temperature(i_full , T_true)
+		Tmeasured = p_selected(i_fixed , e_surf)
+		T_corrected = stray_radiation_corrected_temperature(p_selected ,Tmeasured, e_surf , T_source , 1.0 , Pyrometers.EnclosureGeometry())
+		@show T_corrected
+		#T_corrected2 = stray_radiation_corrected_temperature(p_selected ,Tmeasured, e_surf , i_test)
+	end
+end
+
+# ╔═╡ f1e1935e-5e1d-4cb7-a0b1-673989871786
+Pyrometers.Planck.band_power(1200 , λₗ=p_selected.λ[1] , λᵣ=p_selected.λ[2])
+
+# ╔═╡ 34502312-07df-4ce8-9bd5-0255c5741c4b
+i_measured_check = Pyrometers.integrate(p_selected , 1200 , i_test)
+
+# ╔═╡ 507e9cfa-4e66-47d6-83ed-d1d1e1de0676
+T_corrected2 = stray_radiation_corrected_temperature(p_selected ,1234.5, e_surf , i_test)
+
+# ╔═╡ 98b830a0-6505-4292-85ed-7c7aaa882bd9
+Pyrometers.fit_integral(e_surf * bb , p_selected.λ[1] , p_selected.λ[2] , i_measured_check)
+
 # ╔═╡ 3e19d251-91f6-4383-bfc8-ffe816570f42
 if is_recalculate
 	md"""
@@ -919,7 +957,7 @@ if is_recalculate
 	
 	ΔT_mat = zeros((_M , _N))
 	Tmeas_mat = zeros((_M , _N))
-	
+	Pyrometers.set_emissivity!(p_selected , 1.0)
 	Threads.@sync for j in 1 : _N
 		Threads.@spawn begin
 		for i in 1 : _M
@@ -1028,6 +1066,7 @@ end
 PLUTO_PROJECT_TOML_CONTENTS = """
 [deps]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
+BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 DelimitedFiles = "8bb1440f-4735-579b-a4ab-409b98df4dab"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 Interpolations = "a98d9a8b-a2ab-59e6-89dd-64a1c18fca59"
@@ -1050,6 +1089,7 @@ StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 ADTypes = "~1.24.0"
+BenchmarkTools = "~1.8.0"
 ForwardDiff = "~1.4.5"
 Interpolations = "~0.16.3"
 JLD2 = "~0.6.6"
@@ -1076,7 +1116,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "7245d4d28413ccb50d60a886606aea1de85f8a01"
+project_hash = "fbf27e2010d2ea000ee39c599fced5ec7b927e76"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -1201,6 +1241,12 @@ version = "1.1.0"
 [[deps.Base64]]
 uuid = "2a0f44e3-6c83-55bd-87e4-b1978d98bd5f"
 version = "1.11.0"
+
+[[deps.BenchmarkTools]]
+deps = ["Compat", "JSON", "Logging", "PrecompileTools", "Printf", "Profile", "Statistics", "UUIDs"]
+git-tree-sha1 = "9670d3febc2b6da60a0ae57846ba74670290653f"
+uuid = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+version = "1.8.0"
 
 [[deps.Bzip2_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl"]
@@ -2290,6 +2336,11 @@ deps = ["Unicode"]
 uuid = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 version = "1.11.0"
 
+[[deps.Profile]]
+deps = ["StyledStrings"]
+uuid = "9abbd945-dff8-562f-b5e8-e1ebf5ef1b79"
+version = "1.11.0"
+
 [[deps.ProgressLogging]]
 deps = ["Logging", "SHA", "UUIDs"]
 git-tree-sha1 = "f0803bc1171e455a04124affa9c21bba5ac4db32"
@@ -3119,10 +3170,11 @@ version = "1.13.0+0"
 """
 
 # ╔═╡ Cell order:
-# ╟─30743a02-c643-4bdc-837e-b97299f9520a
+# ╠═30743a02-c643-4bdc-837e-b97299f9520a
 # ╠═5e712312-0fc7-4205-84cc-834d57b814a3
 # ╠═ba23c985-74c4-41f3-8bc4-f7287e30e47f
 # ╠═89a11dcd-b3b5-4349-930d-a66ad74e8fa2
+# ╠═4f1397e1-018d-4965-b3e1-78ccac62b54c
 # ╠═9cd8fe6d-dcf9-472e-a019-19b4c1a182ed
 # ╠═15a5265e-61bc-440d-9a7d-ff10773b78d8
 # ╠═171409eb-22b5-4bc5-a8e2-eac0932a24f3
@@ -3184,7 +3236,7 @@ version = "1.13.0+0"
 # ╟─1c2bd109-8023-49a5-87ba-32d755b201dd
 # ╟─01752ec9-b480-45b9-b299-d9c18d02a749
 # ╟─0404bf20-57a4-4c7c-bf23-70d3541a6787
-# ╟─ad622962-9cd8-432c-a988-ec8b3d676077
+# ╠═ad622962-9cd8-432c-a988-ec8b3d676077
 # ╟─c918b685-1b6e-4ce3-a1e6-501c6b4ffe0e
 # ╠═96feae26-99e4-45c9-869b-410ec7965b63
 # ╠═c5a00df1-ff02-4564-9838-e678f8ea7389
@@ -3202,7 +3254,7 @@ version = "1.13.0+0"
 # ╟─c01e05c7-2b29-4f57-96ee-9a4eebef9025
 # ╟─48b184a0-b1df-461e-a3f5-3c8be72ab875
 # ╟─f181980f-bf72-4468-8daa-9461c6c901e0
-# ╟─0cb50b02-ab41-416c-8610-c3ff318b117b
+# ╠═0cb50b02-ab41-416c-8610-c3ff318b117b
 # ╟─5b647454-e5fc-4c65-8a0a-8eb499955cc1
 # ╟─45396db0-b967-456a-b0e2-eec411675827
 # ╟─12b14bc0-b3bb-48aa-b3fa-674b33b22034
@@ -3210,7 +3262,13 @@ version = "1.13.0+0"
 # ╟─ff5266ce-b7f2-46e2-a4b6-30057879bd97
 # ╟─0428e504-e163-4945-a2fa-7175e0b33020
 # ╟─52312616-c471-4b35-bb98-46c42a82d191
-# ╟─10298d52-d411-475f-b7f6-8562ed2a25bc
+# ╠═10298d52-d411-475f-b7f6-8562ed2a25bc
+# ╠═831ead94-fd87-4412-80e5-01f557eee355
+# ╠═f1e1935e-5e1d-4cb7-a0b1-673989871786
+# ╠═ed653f67-2f49-432b-b691-a79f7e1d51e4
+# ╠═34502312-07df-4ce8-9bd5-0255c5741c4b
+# ╠═507e9cfa-4e66-47d6-83ed-d1d1e1de0676
+# ╠═98b830a0-6505-4292-85ed-7c7aaa882bd9
 # ╟─c9634225-fa52-4747-8f45-3511141bd164
 # ╟─3e19d251-91f6-4383-bfc8-ffe816570f42
 # ╟─ce4f2fdd-16b1-46e8-88a4-a952896b6df8

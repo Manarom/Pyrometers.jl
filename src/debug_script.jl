@@ -300,10 +300,7 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
             es , ew = ϵ_surf(2.5) , ϵ_wall(2.5)
             i_test = es * PlanckFunctions.ibb(2.5 , Ttrue) + (1 - es) * ew * PlanckFunctions.ibb(2.5 , Tsource)
 
-
-
             i_full_iso = Pyrometers.fix_temperature(i_full , Ttrue)
-
             @test i_full_iso(2.5) ≈ i_test
             
             I_total = Pyrometers.integrate(p , i_full_iso)

@@ -356,7 +356,16 @@ fix_temperature(q::AbstractSpectralQuantity , fixed_temperature::Number) = Isoth
         sqi::SQI
         i::T 
     end
-    function fit_spectral_quantity_integrator(sqi::SpectralQuantityIntegrator , imeasured::Number; T_starting=600.0)
+    """
+    fit_integral(a::AbstractSpectralQuantity , l1, l2 , measured)
+
+Fits the temperature of any spectral quantity to a specified value 
+"""
+function fit_integral(a::AbstractSpectralQuantity , l1, l2 , measured) 
+    sqi = SpectralQuantityIntegrator(a  ,l1 , l2)
+    return fit_spectral_quantity_integrator(sqi , measured)
+end
+function fit_spectral_quantity_integrator(sqi::SpectralQuantityIntegrator , imeasured::Number; T_starting=600.0)
         ctx = SpectralQuantityIntegratorContext(sqi, imeasured)
         return Roots.find_zero(ctx , T_starting ,  Roots.Halley())
     end
@@ -1113,15 +1122,18 @@ The system geometry is assumed to be an enclosure (`EnclosureGeometry`), meaning
 reflections are neglected, yielding a simple effective reflectivity of `r_eff = 1 - ϵ_surf`.
 """
 function stray_radiation_corrected_temperature(p::Pyrometer, Tmeasured::Number, 
+                                                    ϵ_surf::Number,
                                                     source_intensity::Number) 
 
-        ϵ_surf = get_emissivity(p)
         measured_signal = signal(p, Tmeasured)         
         r_eff   = one(ϵ_surf) - ϵ_surf
         reflected_signal = r_eff * source_intensity
         pure_signal = measured_signal - reflected_signal
         return p(pure_signal)
     end
+stray_radiation_corrected_temperature(p::Pyrometer, 
+                                        Tmeasured::Number, 
+                                        source_intensity::Number) = (p, Tmeasured,  get_emissivity(p) ,source_intensity)
 """
     stray_radiation_corrected_temperature(p::RatioPyrometer, Tmeasured::Number, 
                                                     source_intensity::NTuple{2 , T}) where T <: Number
@@ -1134,10 +1146,10 @@ The system geometry is assumed to be an enclosure (`EnclosureGeometry`), meaning
 reflections are neglected, yielding independent channel reflectivities `r_eff = 1 - e_surf`. 
 Returns the true temperature resolved from the corrected signal ratio.
 """
-function stray_radiation_corrected_temperature(p::RatioPyrometer, Tmeasured::Number, 
+function stray_radiation_corrected_temperature(p::RatioPyrometer, Tmeasured::Number, e_surf::NTuple{2},
                                                     source_intensity::NTuple{2 , T}) where T <: Number
 
-        e_surf1 , e_surf2 = get_emissivity(p)
+        e_surf1 , e_surf2 = e_surf
         si1 , si2 = source_intensity[1] , source_intensity[2]
         m_s1 , m_s2 = signal(p, Tmeasured)         
         r_eff1 , r_eff2   = ( one(e_surf1) - e_surf1 , one(e_surf2) - e_surf2)
@@ -1145,6 +1157,9 @@ function stray_radiation_corrected_temperature(p::RatioPyrometer, Tmeasured::Num
         p_s1 , p_s2 = m_s1 - r_s1 , m_s2 - r_s2
         return p(p_s1/p_s2)
     end
+    
+stray_radiation_corrected_temperature(p::RatioPyrometer, Tmeasured::Number,
+                                                    source_intensity::NTuple{2 , T}) where T <: Number = stray_radiation_corrected_temperature(p , Tmeasured, get_emissivity(p), source_intensity)
 
 """
     stray_radiation_corrected_temperature(p::AbstractPyrometer, Tmeasured::Number, ϵ_surf::Union{AbstractContinuousOrDiscreteQuantity, Number}, Tsource::Number, ϵ_src::Union{AbstractContinuousOrDiscreteQuantity, Number}, geometry::AbstractRadiationGeometry=EnclosureGeometry())
