@@ -17,16 +17,16 @@ macro bind(def, element)
 end
 
 # ╔═╡ ba23c985-74c4-41f3-8bc4-f7287e30e47f
-using Revise,StaticArrays,OrderedCollections,Optimization,OptimizationOptimJL,LaTeXStrings,NumericalIntegration,Interpolations,Plots,PlutoUI,DelimitedFiles , ForwardDiff , PlutoPlotly , PrettyTables, JLD2 , Roots , QuadGK , ADTypes , ForwardDiff
+using Revise,StaticArrays,OrderedCollections,Optimization,OptimizationOptimJL,LaTeXStrings,NumericalIntegration,Interpolations,Plots,PlutoUI,DelimitedFiles , ForwardDiff , PlutoPlotly , PrettyTables, JLD2 , Roots , QuadGK , ADTypes , ForwardDiff , StatsBase
 
 # ╔═╡ 15a5265e-61bc-440d-9a7d-ff10773b78d8
 using Main.Pyrometers #this line returns not defined error on the first Pluto run (probably, because of the Pluto running all "using"'s before the cells) just re-run this cell manually
 
 # ╔═╡ 30743a02-c643-4bdc-837e-b97299f9520a
 md"""
-#  `RadiationPyrometry.jl`   
+#  `Pyrometry.jl`   
 
-######  **`RadiationPyrometry.jl`** содержит набор методов и типов для воздания виртуальных пирометров. Виртуальный пирометр может "измерять" температуру по загружаемой интенсивности излучения, а также подстраивать излучательную способность пирометра под заданную "измеренную" температуру.
+######  **`Pyrometry.jl`** содержит набор методов и типов для воздания виртуальных пирометров. Виртуальный пирометр может "измерять" температуру по загружаемой интенсивности излучения, а также подстраивать излучательную способность пирометра под заданную "измеренную" температуру.
 ____________________
 ## Установка пакета
 
@@ -65,7 +65,10 @@ begin
 	plot_common_args = (grid = true, gridlinewidth=3, gridstyle = :dot,minorgrid=true, box = :on, linewidth = 3 , fmt = :png)
 	data_folder = joinpath(notebook_dir , "data")
 	data_names = readdir(data_folder)
-end;
+end
+
+# ╔═╡ 7d37ae06-c81b-4aa1-a05c-e03b83e395d7
+data_folder
 
 # ╔═╡ 7cfee16a-4c47-4ded-9b5a-4a21e59dd9ad
 begin
@@ -92,7 +95,7 @@ end
 md"""
 ## Введение
 
-Этот ноутбук содержит три примера использования пакета **RadiationPyrometers.jl**. Цель этого небольшого пакета — создание виртуального пирометра, который можно использовать для расчета коэффициента излучения реального прибора. Это позволяет корректировать измеренную температуру так, чтобы она соответствовала фактической температуре нагретого объекта.
+Этот ноутбук содержит три примера использования пакета **Pyrometers.jl**. Цель этого небольшого пакета — создание виртуального пирометра, который можно использовать для расчета коэффициента излучения реального прибора. Это позволяет корректировать измеренную температуру так, чтобы она соответствовала фактической температуре нагретого объекта.
 
 """
 
@@ -149,13 +152,13 @@ end
 	"""
 end
 
-# ╔═╡ 72095f49-f6c0-41a8-be2f-323a0bacfc51
-md""" Материал поверхности: $(@bind material_selection Select(data_names , default = "zrb2.txt"))"""
-
 # ╔═╡ 51de94a8-60ae-4099-97f8-f20582c4bc48
 md""" 
 Что построить : $(@bind what_to_plot Select([:i,:di,:d2i]))
 """
+
+# ╔═╡ 72095f49-f6c0-41a8-be2f-323a0bacfc51
+md""" Материал поверхности: $(@bind material_selection Select(data_names , default = "zrb2.txt"))"""
 
 # ╔═╡ 7cc110e9-7655-4dfc-b1e0-ab3905866425
 @bind  scales_BB PlutoUI.combine() do Child
@@ -275,17 +278,17 @@ _______________________
 
 Поскольку энергия теплового излучения `абсолютно черного тела` сильно зависит от температуры, эту величину можно использовать для измерения температуры реальной поверхности. В этом заключается основная идея пирометрии частичного излучения: **измерить интенсивность, чтобы получить температуру**. Так как интенсивность является величиной направленной, пирометру требуется коллимирующая оптика (телескоп). Степень черноты реальных поверхностей часто существенно меняется в зависимости от длины волны; в то же время пирометры частичного излучения предполагают постоянную степень черноты (так называемое «серое» приближение в полосе пропускания). Таким образом, для промышленных целей полезно иметь несколько пирометров, каждый из которых работает в относительно узком спектральном диапазоне. В спектральном диапазоне пирометра частичного излучения степень черноты не должна значительно изменяться, чтобы допущение о её постоянстве оставалось актуальным.
 
-Пакет [RadiationPyrometers.jl](https://manarom.github.io/RadiationPyrometers.jl) предоставляет ряд функций для работы с `виртуальными` пирометрами частичного излучения.
+Пакет [Pyrometers.jl](https://manarom.github.io/Pyrometers.jl) предоставляет ряд функций для работы с `виртуальными` пирометрами частичного излучения.
 
 """
 
 # ╔═╡ b7fac177-c211-4635-992f-e6473be7bdae
 md"""
-Словарь **RadiationPyrometers.DefaultPyrometersTypes** содержит названия стандартных типов пирометров вместе с их спектральными диапазонами. Пользовательский пирометр можно создать, указав его тип (имя), длину волны или спектральный диапазон, а также рабочую степень черноты:
+Словарь **Pyrometers.DefaultPyrometersTypes** содержит названия стандартных типов пирометров вместе с их спектральными диапазонами. Пользовательский пирометр можно создать, указав его тип (имя), длину волны или спектральный диапазон, а также рабочую степень черноты:
 
 ```julia
 # создание пользовательских объектов-пирометров
-p_custom = RadiationPyrometers.Pyrometer(type = "Custom", λ = [2.5, 3.7], ϵ = 0.65)
+p_custom = Pyrometers.Pyrometer((2.5, 3.7) , type = :Custom, ϵ = 0.65)
 ```
 """
 
@@ -293,15 +296,15 @@ p_custom = RadiationPyrometers.Pyrometer(type = "Custom", λ = [2.5, 3.7], ϵ = 
 md" ### II.I Типовые пирометры частичного излучения "
 
 # ╔═╡ e2a9aa39-2490-4681-89d3-a01f058f6feb
-pretty_table(HTML, Pyrometers.DefaultPyrometersTypes,top_left_string ="Таблица типовых пирометров в пакете `RadiationPyrometers.jl` и соотвествующие диапазоны длин волн", wrap_table_in_div=true , column_labels=["Тип пирометра" , "Диапазон длин волн"])
+pretty_table(HTML, Pyrometers.DefaultPyrometersTypes,top_left_string ="Таблица типовых пирометров в пакете Pyrometers.jl и соотвествующие диапазоны длин волн", wrap_table_in_div=true , column_labels=["Тип пирометра" , "Диапазон длин волн"])
 
 
 # ╔═╡ 02eee968-ff43-4b82-8d68-efede1a220dd
 md"""
-После создания объекта **Pyrometer** его можно использовать для «измерения» температуры, а именно — для преобразования интенсивности излучения реальной поверхности в значение температуры в соответствии со спектральным диапазоном прибора. Это делается с помощью функции **RadiationPyrometers.measure(pyr, measured_intensity)** (интенсивность должна быть указана в соответствующих единицах [Вт/м²⋅ср⋅мкм]). На практике часто бывает известна истинная температура поверхности в какой-то момент; в этом случае степень черноты виртуального пирометра можно скорректировать так, чтобы «измеренная» температура совпала с реальной. Это можно сделать с помощью функции:
+После создания объекта **Pyrometer** его можно использовать для «измерения» температуры, а именно — для преобразования интенсивности излучения реальной поверхности в значение температуры в соответствии со спектральным диапазоном прибора. Это делается с помощью функции ``Pyrometers.measure(pyr, measured_intensity)`` (интенсивность должна быть указана в соответствующих единицах [Вт/м²⋅ср⋅мкм]) или просто `pyr(measured_intensity)`, так как объект - пирометр является вызываемым. На практике часто бывает известна истинная температура поверхности в какой-то момент; в этом случае степень черноты виртуального пирометра можно скорректировать так, чтобы «измеренная» температура совпала с реальной. Это можно сделать с помощью функции:
 
 ```julia
-RadiationPyrometers.fit_ϵ!(p::Pyrometer, Tmeasured::Float64, Treal::Float64) 
+Pyrometers.fit_ϵ!(p::Pyrometer, Tmeasured::Float64, Treal::Float64) 
 ```
 
 """
@@ -443,15 +446,18 @@ begin
 	#wavlength = RadiationPyrometers.wlength
 	full_wavelengths_range = Pyrometers.full_wavelength_range(pyrometers_vector)
 	jj = indexin(T_ref1,ref_T)[]
+	foreach(pyrometers_vector) do p
+			Pyrometers.set_emissivity!(p , 1.0)
+	end
 	ej = Pyrometers.fit_ϵ_wavelength!(pyrometers_vector,T_ref1,bb_calibration_table_data[jj,2:end])
 	pppp = Plots.plot(full_wavelengths_range, ej, title="Spectral emissivity of the blackbody reference",label ="T = $(ref_T[jj]) , K",grid=true; plot_common_args...)
-	for T_reference in (T_ref2,T_ref3)
+	for T_reference in (T_ref2 , T_ref3)
 		foreach(pyrometers_vector) do p
 			Pyrometers.set_emissivity!(p , 1.0)
 		end
 		global jj = indexin(T_reference,ref_T)[]
-		global ej = Pyrometers.fit_ϵ_wavelength!(pyrometers_vector,ref_T[jj],bb_calibration_table_data[jj,2:end])
-		Plots.plot!(pppp,full_wavelengths_range, ej, label=" T = $(ref_T[jj]) , K"; plot_common_args...)
+		global ej = Pyrometers.fit_ϵ_wavelength!(pyrometers_vector , ref_T[jj],bb_calibration_table_data[jj,2:end])
+		Plots.plot!(pppp,full_wavelengths_range , ej, label=" T = $(ref_T[jj]) , K"; plot_common_args...)
 	end
 	xlabel!(pppp,"Wavelength, μm")
 	ylabel!(pppp,"Emissivity")
@@ -471,7 +477,7 @@ md"""
 # ╔═╡ 854f8c06-aac6-464f-899c-41ca706b259a
 md"""
 
-На практике возникают ситуации, когда необходимо производить измерения температуры поверхности в условиях внешней застветки. Например, это может быть актуально при нагреве поверхности высокоинтенсивным источником излучения. При этом спектры теплового излучения источника и поверхности объекта могут быть существенно разнесены по оси абсцисс.
+На практике возникают ситуации, когда необходимо производить измерения температуры поверхности в условиях внешней застветки. Например, это может быть актуально при нагреве поверхности высокоинтенсивным источником излучения. 
 
 """
 
@@ -492,22 +498,58 @@ md"""
 
 # ╔═╡ 620dce38-97ce-495f-9b23-1b8290cbd973
 begin 
-	to_names = Dict(data_names[1] => "Cr2O3" ,data_names[2] => "кварцевая керамика" ,data_names[3] => "РСНК"   , data_names[4] => "ZrB2")
+	to_names = Dict(data_names[1] => "Cr2O3" , data_names[2] => "Black"  , data_names[3] => "DKS#8", data_names[4] => "кварцевая керамика" ,data_names[5] => "РСНК"   , data_names[6] => "ZrB2" , "fixed" => "fixed")
 end;
 
 # ╔═╡ b15bd3b0-0971-4b22-a109-0ed56afda615
 begin 
 	all_emissivities = Plots.plot(;plot_common_args...)
+	all_emissivities_data = OrderedDict{String,AbstractExtrapolation}()
+	λ_plot = λ2[1:20:end]
 	for et in  data_names
 		_data = readdlm(joinpath(data_folder , et))
 		eint = linear_interpolation(_data[:,1] , _data[:,2] , extrapolation_bc=Line())
-		ϵ = eint.(λ2)
-		Plots.plot!(all_emissivities,λ2 , ϵ ; plot_common_args... , label = to_names[et])
+		ϵ = eint.(λ_plot)
+		Plots.plot!(all_emissivities,λ_plot , ϵ ; plot_common_args... , label = to_names[et] , linestyle = :auto , markershape = :auto , markerstrokecolor = :auto , markersize = 8 )
+		push!(all_emissivities_data , et => eint)
 	end
 	all_emissivities
 	xlabel!(all_emissivities , "Длина волны, мкм")
 	ylabel!(all_emissivities , "Излучательная способность")
 end
+
+# ╔═╡ d67ef942-be2d-4fad-91ba-eff9eda9d8e3
+begin 
+	p_in = Pyrometers.SpectralBandPyrometer(8.0 , 9.7 , type = :IN59)
+	p_thermo = Pyrometers.SpectralBandPyrometer(8.0 , 14.0 , type = :UV640)
+	special_pyrometers = (p_in , p_thermo)
+end
+
+# ╔═╡ da0a4a00-692a-4d29-97cb-74366e8374c9
+begin 
+	e_int_plot = (Plots.plot(;plot_common_args...) , Plots.plot(;plot_common_args...) )
+	T_integra = range(273,1973,20)
+	
+	for (pyr_number , pyr) in enumerate(special_pyrometers)
+		for (k , d) in all_emissivities_data
+			_em_wrapper = Pyrometers.IsothermalSpectralQuantity(d)
+			_e_int = fill(0.0 , length(T_integra))
+			for (i , t) in enumerate(T_integra)
+				_e_int[i] = first(Pyrometers.integral_emissivity(pyr , _em_wrapper , t))
+			end
+			plot!(e_int_plot[pyr_number] , T_integra .- 273.15, _e_int;
+				  plot_common_args... , xlabel = "Температура, ᵒC" , ylabel = "Интегральная ИС" , label ="$(to_names[k]) : <ϵ> = $(round(StatsBase.mean(_e_int) , digits = 2))" , legend = :bottomright ,  linestyle = :auto , markershape = :auto , markerstrokecolor = :auto , markersize = 8 )
+			title!(e_int_plot[pyr_number] , "$(Pyrometers.shorthand(pyr))")
+		end
+	end
+	#title!()
+end
+
+# ╔═╡ 90e15591-d885-48f3-bc46-cb9385c9ed13
+ylims!(e_int_plot[1] , (0.8 , 1.01))
+
+# ╔═╡ afb61470-2455-4742-b81f-63baf5a4c3ce
+ylims!(e_int_plot[2] , (0.65 , 1.01))
 
 # ╔═╡ 8cef05a1-2974-4c38-b73e-fa706f347fcc
 md" Show wavelength range: $(@bind λ_show RangeSlider(range(extrema(λ2)... , 1000)))"
@@ -520,6 +562,9 @@ md"""
 Температура образца  ``T_1 `` = $(@bind T1 Slider(300.0:1e-2:3000 , show_value = true , default = 1273.15)), K
 
 """
+
+# ╔═╡ 1c2bd109-8023-49a5-87ba-32d755b201dd
+@bind selected_standard_pyros MultiSelect(collect(keys(Pyrometers.DefaultPyrometersTypes)) , default=collect(keys(Pyrometers.DefaultPyrometersTypes)))
 
 # ╔═╡ ad622962-9cd8-432c-a988-ec8b3d676077
 md" Использовать излучение объекта в виде интерполятора $(@bind use_external_lamp CheckBox(true))"
@@ -542,7 +587,7 @@ md" Interpolator location $(@bind interpolator_folder TextField(120,default = @_
 interpolators_in_folder = collect(f for f in readdir(interpolator_folder) if contains(f , ".jld2")  );
 
 # ╔═╡ 1811e43c-f7db-47b1-9b83-bb38455d7db3
-pyrometers_vector2 = deepcopy(pyrometers_vector);
+#pyrometers_vector2 = deepcopy(pyrometers_vector);
 
 # ╔═╡ 8ece7476-4257-49f8-a400-50bcc347908d
 use_external_lamp && !isempty(interpolators_in_folder) && md""" Select interpolator file $(
@@ -554,7 +599,7 @@ interpolators_in_folder
 # ╔═╡ c5a00df1-ff02-4564-9838-e678f8ea7389
 if use_external_lamp && !isempty(interpolators_in_folder)
 	lamp_interpolator =JLD2.load(joinpath(interpolator_folder , interpolator_file_name))["lamp_interpolator"]
-	voltage_range = 100:10:240
+	voltage_range = [100.0 , 140.0 , 180.0 , 220.0 , 240.0]
 end
 
 # ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
@@ -572,6 +617,9 @@ md"""
 # ╔═╡ a0197a9a-34bf-4a3e-af8a-c23ea777f482
 md" **Пользовательский диапазон длин волн** : $(@bind use_custom CheckBox(default = false))"
 
+# ╔═╡ a90bde8a-222b-4b93-892b-9fa4cfc43372
+md" **Пользовательский пирометр** : $(@bind use_custom_pyros CheckBox(default = true))"
+
 # ╔═╡ d86d7e8d-94e7-4d1b-b4d8-df52e338935d
 #md" ИСпользовать заданную ИС $()
 
@@ -588,6 +636,12 @@ md"""
 
 """
 end
+
+# ╔═╡ c01e05c7-2b29-4f57-96ee-9a4eebef9025
+md"""
+
+User defined pyrometer $(@bind custom_selection Select( [p_in=>"IN59" , p_thermo=>"UV640"]  ))
+"""
 
 # ╔═╡ f181980f-bf72-4468-8daa-9461c6c901e0
 md"""
@@ -627,28 +681,20 @@ md"""
 
 # ╔═╡ 5b647454-e5fc-4c65-8a0a-8eb499955cc1
 if  use_custom
-	p_custom = RadiationPyrometers.Pyrometer(type = "C" , λ = [custom_waves...] , ϵ = 1.0)
-end;
+	p_custom = Pyrometers.Pyrometer( [custom_waves...] , type = :C  , ϵ = 1.0)
+end
 
-# ╔═╡ 6674b895-8aa9-4cbb-a407-82892128ca3e
-last_column_plot_data = Dict{String, Matrix{Float64}}()
+# ╔═╡ 12b14bc0-b3bb-48aa-b3fa-674b33b22034
+@bind clear_plots Button("Clear plots")
+
+# ╔═╡ aa7ddfa0-8e68-43c9-9051-30e31cd3d906
+begin 
+	clear_plots
+	last_column_plot_data = Dict{String, Matrix{Float64}}()
+end
 
 # ╔═╡ 0428e504-e163-4945-a2fa-7175e0b33020
 last_column_plot_data
-
-# ╔═╡ 52312616-c471-4b35-bb98-46c42a82d191
-begin 
-	last_column_plot = nothing
-	emissivity_type
-	if !isempty(last_column_plot_data)
-		last_column_plot = Plots.plot()
-		for (k,d) in last_column_plot_data
-			Plots.plot!(last_column_plot , d[:,1] .- 273.15, d[:,2];plot_common_args..., label = to_names[k] , xticks =10)
-		end
-	end
-	xlabel!(last_column_plot , "Температура, ᵒC")
-	ylabel!(last_column_plot , "ΔT/T, %")
-end
 
 # ╔═╡ c9634225-fa52-4747-8f45-3511141bd164
 md""" 
@@ -699,8 +745,10 @@ end;
 begin 
 
 	Tmeas = Dict{String , NamedTuple{(:Tmeas , :ΔT , :ΔTrel) ,Tuple{Float64 , Float64 , Float64}}}()
-	for p in pyrometers_vector2
-		
+	if !isempty(selected_standard_pyros)
+	for nm in selected_standard_pyros
+
+		p = Pyrometers.Pyrometer(nm)
 	
 		is_two_wavelength_pyrometer = Pyrometers.is_spectral_band(p)
 		# 
@@ -727,7 +775,7 @@ begin
 	# temperature measured by the current pyrometer 
 	end
 	
-	pyrometers_vector2
+	end
 end
 
 # ╔═╡ 01752ec9-b480-45b9-b299-d9c18d02a749
@@ -810,14 +858,15 @@ if is_recalculate #data preparation block
 		T2_scan = voltage_range
 	end
 
-
-	if use_custom
+	if use_custom_pyros
+		p_selected = custom_selection
+	elseif use_custom
 		p_selected = p_custom
 	else
 		p_selected = filter(p->p.type == selected_type , pyrometers_vector2)[]
 	end
 	
-	_is2 = RadiationPyrometers.is_narrow_band(p_selected)
+	_is2 = Pyrometers.is_spectral_band(p_selected)
 		# 
 	l = _is2 ? p_selected.λ : [p_selected.λ[]-0.2 , p_selected.λ[]+0.2 ]
 	
@@ -827,7 +876,7 @@ if is_recalculate #data preparation block
 	e_avg = sum(e_s)/length(e_s)
 
 	# setting averaged value of emissivity to pyrometer
-	RadiationPyrometers.set_emissivity(p_selected, e_avg)
+	Pyrometers.set_emissivity!(p_selected, e_avg)
 	
 	# calculating the measured by the pyrometer value 
 	
@@ -835,6 +884,22 @@ if is_recalculate #data preparation block
 	_M = length(T2_scan)
 
 
+end
+
+# ╔═╡ 52312616-c471-4b35-bb98-46c42a82d191
+begin 
+	last_column_plot = nothing
+	emissivity_type
+	if !isempty(last_column_plot_data)
+		last_column_plot = Plots.plot()
+		for (k,d) in last_column_plot_data
+			(k=="fixed") && continue
+			Plots.plot!(last_column_plot , d[:,1] .- 273.15, d[:,2];plot_common_args..., label = to_names[k] , xticks =10  , linestyle = :auto , marker = :auto , markersize = 8 , markeralpha = 0.8)
+		end
+	end
+	xlabel!(last_column_plot , "Температура поверхности, ᵒC")
+	ylabel!(last_column_plot , "ΔT/T, %")
+	title!(last_column_plot , Pyrometers.shorthand(p_selected))
 end
 
 # ╔═╡ 3e19d251-91f6-4383-bfc8-ffe816570f42
@@ -871,7 +936,7 @@ if is_recalculate
 
 			
 			
-			t_meas = RadiationPyrometers.measure(p_selected , i_measured_int, T_starting = t1)
+			t_meas = Pyrometers.measure(p_selected , i_measured_int, T_starting = t1)
 			
 			ΔT_mat[i , j] = (t_meas - t1)/t1
 			Tmeas_mat[i , j] = t_meas
@@ -925,14 +990,14 @@ if is_recalculate
         # Размер и пропорции
         size = (800, 600),
         camera = (45, 30), 
-		title = "IN 5/9, $(to_names[emissivity_type])",
+		title = "$(Pyrometers.shorthand(p_selected)) : $(to_names[emissivity_type])",
 			 fmt = :png
     )
 	end
 end
 
 # ╔═╡ ff5266ce-b7f2-46e2-a4b6-30057879bd97
-last_column_plot_data[emissivity_type] = hcat(collect(T1_scan) , abs.(vec(100*ΔT_mat[end , :])))
+last_column_plot_data[emissivity_type] = hcat(collect(T1_scan) , abs.(vec(100*ΔT_mat[end , :])));
 
 # ╔═╡ ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 if is_recalculate
@@ -945,7 +1010,7 @@ end
 # ╔═╡ dd1561e2-233f-425a-832f-130b49f0bf0b
 if is_recalculate
 	
-	out_table =map(t->round(t,digits=2),  hcat(T2_scan[1:2:end], 100*ΔT_mat[1:2:end , 1:4:end]))
+	out_table =map(t->round(t,digits=2),  hcat(T2_scan, 100*ΔT_mat[: , 1:4:end]))
 	col_nms =vcat("V",map(t -> "$(round(t - 273.15,digits =1))",  T1_scan[1:4:end]))
 	pretty_table(HTML , out_table , title="$(to_names[emissivity_type])", column_labels=col_nms)
 end
@@ -981,6 +1046,7 @@ QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Revise = "295af30f-e4ad-537b-8983-00126c2a3abe"
 Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 
 [compat]
 ADTypes = "~1.24.0"
@@ -1001,6 +1067,7 @@ QuadGK = "~2.11.3"
 Revise = "~3.17.0"
 Roots = "~3.0.8"
 StaticArrays = "~1.9.20"
+StatsBase = "~0.34.13"
 """
 
 # ╔═╡ 00000000-0000-0000-0000-000000000002
@@ -1009,7 +1076,7 @@ PLUTO_MANIFEST_TOML_CONTENTS = """
 
 julia_version = "1.12.5"
 manifest_format = "2.0"
-project_hash = "0469aec1cfe5d90b123fd4a3769c4b42ba1f40ee"
+project_hash = "7245d4d28413ccb50d60a886606aea1de85f8a01"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -3060,13 +3127,14 @@ version = "1.13.0+0"
 # ╠═15a5265e-61bc-440d-9a7d-ff10773b78d8
 # ╠═171409eb-22b5-4bc5-a8e2-eac0932a24f3
 # ╠═04f9f75e-34cc-4921-971e-6958ed960518
+# ╠═7d37ae06-c81b-4aa1-a05c-e03b83e395d7
 # ╟─7cfee16a-4c47-4ded-9b5a-4a21e59dd9ad
 # ╟─d5ee3913-66be-47d7-a755-699ba64b4f98
 # ╟─d442014a-20e6-4be4-ac7f-f13de329dec5
 # ╟─27b3c586-9eb0-4a51-b9ca-a9c0379fccdf
 # ╟─f22d22b6-5d98-4cc4-998f-a53e92809618
-# ╟─72095f49-f6c0-41a8-be2f-323a0bacfc51
 # ╟─51de94a8-60ae-4099-97f8-f20582c4bc48
+# ╟─72095f49-f6c0-41a8-be2f-323a0bacfc51
 # ╟─7cc110e9-7655-4dfc-b1e0-ab3905866425
 # ╟─4d6337aa-cfc7-4154-a395-5aa53e23d01a
 # ╟─f5a2937c-ce1c-4c03-8e86-8db363bd21c9
@@ -3086,29 +3154,34 @@ version = "1.13.0+0"
 # ╟─712828a7-fb54-42e6-95fc-233243190f59
 # ╟─f763d449-2a7a-4008-a183-823a774bc25e
 # ╟─667f7c30-56e0-461f-b35b-c924007eb9f2
-# ╠═a861d56f-f6c9-4754-b7a9-ed63713f1f2f
+# ╟─a861d56f-f6c9-4754-b7a9-ed63713f1f2f
 # ╟─d08ec8f2-7689-4043-9f28-da06ab0124b9
 # ╟─3ddc9d4e-ff96-4173-899b-3eae0facb830
 # ╟─c5ac80ee-8143-4c28-bbff-2ac761c71fac
 # ╟─0c9fe7b1-374c-4fb8-9cfe-9337389713bf
 # ╟─bc2d93ae-6c30-462c-96e0-30fdb84d7c63
-# ╠═d3199b6e-9779-4def-b701-fe85d1035045
+# ╟─d3199b6e-9779-4def-b701-fe85d1035045
 # ╟─6aa82819-6f5a-43af-ac03-4775fce51564
 # ╟─72947d97-0a97-4064-a2fe-08d19dec0f0e
 # ╟─854f8c06-aac6-464f-899c-41ca706b259a
 # ╟─9ce196c1-8915-46da-9aba-f13d7655959a
-# ╠═86af6afc-b28a-4e84-952a-bd29710374f8
-# ╠═efc35420-d0e6-4795-94b6-d43289b4de44
+# ╟─86af6afc-b28a-4e84-952a-bd29710374f8
+# ╟─efc35420-d0e6-4795-94b6-d43289b4de44
 # ╟─6342e92b-4434-4e4b-aa2f-56405277caed
-# ╠═620dce38-97ce-495f-9b23-1b8290cbd973
+# ╟─620dce38-97ce-495f-9b23-1b8290cbd973
 # ╟─b15bd3b0-0971-4b22-a109-0ed56afda615
-# ╠═5dafdc88-bd40-4347-aa62-e841d15c1bd7
+# ╠═da0a4a00-692a-4d29-97cb-74366e8374c9
+# ╠═90e15591-d885-48f3-bc46-cb9385c9ed13
+# ╠═afb61470-2455-4742-b81f-63baf5a4c3ce
+# ╠═d67ef942-be2d-4fad-91ba-eff9eda9d8e3
+# ╟─5dafdc88-bd40-4347-aa62-e841d15c1bd7
 # ╟─a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
 # ╟─18daa932-fd3a-4056-aa07-4dcf26c7d57a
 # ╟─8cef05a1-2974-4c38-b73e-fa706f347fcc
 # ╟─36ba2396-bb5e-4d22-a58e-9ab27cd18b2d
 # ╟─91bbd553-4e4a-431d-9d54-b0f4882fd426
 # ╟─15f1519b-d924-4fa9-b212-eebba75c544a
+# ╟─1c2bd109-8023-49a5-87ba-32d755b201dd
 # ╟─01752ec9-b480-45b9-b299-d9c18d02a749
 # ╟─0404bf20-57a4-4c7c-bf23-70d3541a6787
 # ╟─ad622962-9cd8-432c-a988-ec8b3d676077
@@ -3123,23 +3196,26 @@ version = "1.13.0+0"
 # ╟─54339700-71fd-48bf-a2ef-0c3267b9d81b
 # ╟─7f76bc22-77c3-4eb3-9d49-588e653df2e7
 # ╟─a0197a9a-34bf-4a3e-af8a-c23ea777f482
+# ╟─a90bde8a-222b-4b93-892b-9fa4cfc43372
 # ╟─d86d7e8d-94e7-4d1b-b4d8-df52e338935d
 # ╟─7793976e-6714-4bc1-9d97-412dd2a67480
+# ╟─c01e05c7-2b29-4f57-96ee-9a4eebef9025
 # ╟─48b184a0-b1df-461e-a3f5-3c8be72ab875
 # ╟─f181980f-bf72-4468-8daa-9461c6c901e0
 # ╟─0cb50b02-ab41-416c-8610-c3ff318b117b
-# ╠═5b647454-e5fc-4c65-8a0a-8eb499955cc1
-# ╠═45396db0-b967-456a-b0e2-eec411675827
-# ╠═6674b895-8aa9-4cbb-a407-82892128ca3e
-# ╠═ff5266ce-b7f2-46e2-a4b6-30057879bd97
-# ╠═0428e504-e163-4945-a2fa-7175e0b33020
-# ╠═52312616-c471-4b35-bb98-46c42a82d191
-# ╠═10298d52-d411-475f-b7f6-8562ed2a25bc
+# ╟─5b647454-e5fc-4c65-8a0a-8eb499955cc1
+# ╟─45396db0-b967-456a-b0e2-eec411675827
+# ╟─12b14bc0-b3bb-48aa-b3fa-674b33b22034
+# ╟─aa7ddfa0-8e68-43c9-9051-30e31cd3d906
+# ╟─ff5266ce-b7f2-46e2-a4b6-30057879bd97
+# ╟─0428e504-e163-4945-a2fa-7175e0b33020
+# ╟─52312616-c471-4b35-bb98-46c42a82d191
+# ╟─10298d52-d411-475f-b7f6-8562ed2a25bc
 # ╟─c9634225-fa52-4747-8f45-3511141bd164
 # ╟─3e19d251-91f6-4383-bfc8-ffe816570f42
 # ╟─ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 # ╟─efcc25ee-a507-4334-b338-f3e050a50c6b
-# ╠═dd1561e2-233f-425a-832f-130b49f0bf0b
+# ╟─dd1561e2-233f-425a-832f-130b49f0bf0b
 # ╠═17131508-d23b-4e95-9303-e4b685dda736
 # ╟─05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 # ╟─e480137d-b6d9-4e18-92f0-640292bbb5f0

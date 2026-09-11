@@ -29,7 +29,7 @@ begin
 end;
 
 # ╔═╡ 05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
-using BenchmarkTools
+using BenchmarkTools , Test
 
 # ╔═╡ 30743a02-c643-4bdc-837e-b97299f9520a
 md"""
@@ -56,6 +56,9 @@ The last line will launch the Pluto starting page in your default browser
 
 # ╔═╡ abdc809b-b53c-4dff-ba6f-c636c73f3fca
 const Planck = Pyrometers.Planck
+
+# ╔═╡ bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
+const MY_GLOBAL_SEGBUF = QuadGK.alloc_segbuf(Float64, Float64, Float64, size=5000);
 
 # ╔═╡ 171409eb-22b5-4bc5-a8e2-eac0932a24f3
 PlutoUI.TableOfContents(indent=true, depth=4, aside=true)
@@ -215,7 +218,7 @@ md"""
 
 ``I_{meas} = \epsilon\mathcal{b}(\lambda , T_1) + (1 - \epsilon)\mathcal{b}(\lambda , T_2)``
 
-Check is it is possible to measure the surface temperature in a presence of external emission with much higher temperature
+Let's check if it is possible to measure the surface temperature in a presence of external emission with a much higher temperature
 """
 
 # ╔═╡ 3581aa29-714b-422a-8feb-d1a0c3ebeec7
@@ -395,21 +398,16 @@ md" Sample emissivity , ϵ = $(@bind ϵ_fixed  Slider(1e-4:1e-4:1.0 , show_value
 # ╔═╡ efc35420-d0e6-4795-94b6-d43289b4de44
 begin 
 	if emissivity_type == "fixed"
-		ϵ = ϵ_fixed
 		eint = Returns(ϵ_fixed)
 	else
 		_data = readdlm(joinpath(data_folder , emissivity_type))
-		if contains(emissivity_type , "quarz")
+		#=if contains(emissivity_type , "quarz")
 			@. _data[:,2] = 1.0 - _data[:,2]
-		end
-		eint = linear_interpolation(_data[:,1] , _data[:,2] , extrapolation_bc=Line())
-		ϵ = eint.(λ2)
-		 
+		end=#
+		eint = @views linear_interpolation(_data[:,1] , _data[:,2] , extrapolation_bc=Line())
 	end
+	e_int_iso = Pyrometers.IsothermalSpectralQuantity(eint)
 end;
-
-# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
-md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
 
 # ╔═╡ 91bbd553-4e4a-431d-9d54-b0f4882fd426
 md"""
@@ -429,7 +427,7 @@ md" Show wavelength range: $(@bind λ_show RangeSlider(range(extrema(λ2)... , 1
 pyrometers_vector2 = deepcopy(pyrometers_vector);
 
 # ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
-md" ### Recalculate T matrix $(@bind is_recalculate CheckBox(false))"
+md" **Recalculate T matrix $(@bind is_recalculate CheckBox(false))**"
 
 # ╔═╡ 7f76bc22-77c3-4eb3-9d49-588e653df2e7
 md"""
@@ -448,23 +446,12 @@ md"""
 	
 Custom pyrometer wavelength range:
 
-λleft = $(Child("left", NumberField(0.1:1e-3:20 , default = 7.2)))
+λleft = $(Child("left", NumberField(0.1:1e-3:20 , default = 8.0)))
 
-λright = $(Child("right", NumberField(0.1:1e-3:20 , default = 7.3)))
+λright = $(Child("right", NumberField(0.1:1e-3:20 , default = 9.7)))
 
 """
 end
-
-# ╔═╡ 969907ad-0c38-4dfb-8e2d-ac25619fbe5f
-custom_waves
-
-# ╔═╡ 5b647454-e5fc-4c65-8a0a-8eb499955cc1
-if is_recalculate && use_custom
-	p_custom = Pyrometers.Pyrometer([custom_waves...],type = :C  , ϵ = 1.0)
-end
-
-# ╔═╡ c9634225-fa52-4747-8f45-3511141bd164
-md" #### Try plotly! : $(@bind is_use_plotly CheckBox(false))"
 
 # ╔═╡ e480137d-b6d9-4e18-92f0-640292bbb5f0
 function two_planck(l , ϵ , T1 , T2)
@@ -473,10 +460,14 @@ end
 
 # ╔═╡ 6342e92b-4434-4e4b-aa2f-56405277caed
 begin 
+	ϵ  = e_int_iso.(λ2)
 	I1 = @. ϵ * Planck.ibb.(λ2 , T1)
 	I2 = @. (1.0 - ϵ) * Planck.ibb.(λ2 , T2)
 	I_measured =@. two_planck.(λ2 , ϵ , T1 , T2)
 end;
+
+# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
+md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
 
 # ╔═╡ 459f54a1-bbf0-4268-8bec-8142d436976a
 begin 
@@ -557,15 +548,12 @@ end;
 # ╔═╡ 48b184a0-b1df-461e-a3f5-3c8be72ab875
 md" Select pyrometer type: $(@bind selected_type Select(kvect , default = pyr_smaller_type) )"
 
-# ╔═╡ 15429248-3b3e-4912-b4a6-25ed2e8b0ebb
-	begin 
-		if use_custom
-		p_selected = p_custom
-	else
-		p_selected = filter(p->p.type == selected_type , pyrometers_vector2)[]
-	end
-		Pyrometers.set_emissivity!(p_selected , 1.0)
-	end
+# ╔═╡ 98cfdb54-7338-401f-8dcb-fd7752a70e0e
+if use_custom
+	p_selected =  Pyrometers.Pyrometer([custom_waves...], type = :C  , ϵ = 1.0)
+else
+	p_selected = Pyrometers.Pyrometer(selected_type)
+end
 
 # ╔═╡ baeafd9c-19bc-4dda-ade2-89b8cf534f88
  begin 
@@ -589,21 +577,42 @@ begin
 		end
 	end
 	(em::MixedRadiationEmitter)(l , t1 , t2) = em.pl1(l , t1) + em.pl2.(l , t2)
+	function fix_second_temperature(me::MixedRadiationEmitter , t)
+		me.pl1 + Pyrometers.fix_temperature(me.pl2 , t)
+	end
 end
 
-# ╔═╡ e5ec9457-c744-4e47-a42a-e7dddeed13dc
-function fix_second_temperature(me::MixedRadiationEmitter , t)
-	me.pl1 + Pyrometers.fix_temperature(me.pl2 , t)
-end
+# ╔═╡ abf9e80e-49e9-4a35-bc68-bb6c4260fa94
+em1 = MixedRadiationEmitter(e_int_iso)
 
-# ╔═╡ 10298d52-d411-475f-b7f6-8562ed2a25bc
-if is_recalculate 
+# ╔═╡ fc3be34a-381b-4735-b201-9479eb43ee43
+em1(2.3 , 1300 , 1800)
+
+# ╔═╡ 2bbe7963-d294-41d3-a308-2a4cf1fddb58
+a = fix_second_temperature(em1 , 1800)
+
+# ╔═╡ b94fca1d-2416-44ff-9e41-40f876fc6b0e
+T_measured = p_selected( a , 1200.0 ,  e_int_iso ) # 1200 is the true temperature 
+
+# ╔═╡ 92edb9f4-cb2b-4a73-85df-197ec6c1a872
+incident_radiation = Pyrometers.PlanckEmitter()
+
+# ╔═╡ 19236d96-33ab-4495-a7eb-697ff5bb43e5
+Pyrometers.stray_radiation_corrected_temperature(p_selected , T_measured , e_int_iso , 1800.0 , 1.0)
+
+# ╔═╡ 5e64a74b-fe14-4461-871b-6b609b5e83cd
+plot(λ_show , em1.(λ_show , 300 , 2800))
+
+# ╔═╡ ba559d2d-3bd0-4cd1-8836-8ab0b860c3a5
+Pyrometers.integrate(p_selected.λ[1] , p_selected.λ[2]  ,1200.0 ,  a )
+
+# ╔═╡ 4f6c8a96-2347-496a-8d71-1d410fa30ac9
+function evaluate_temperature_error(p , e)
 	
-	T_surf_scan = 273.0:50:1373
-	T_heater_scan = 1273.0:50:3800
+	T_surf_scan = range(273,1773 , 25)
+	T_heater_scan = range(1673, 2973 , 25)
 
-	e_int_iso = Pyrometers.IsothermalSpectralQuantity(eint)
-	em_stray_rad = MixedRadiationEmitter(e_int_iso)
+	em_stray_rad = MixedRadiationEmitter(e)
 
 	
 	_N = length(T_surf_scan)
@@ -613,42 +622,31 @@ if is_recalculate
 	Tmeas_mat = zeros((_M , _N))
 	exclution_error = zeros((_M , _N))
 	
-	 for i in 1 : _M
+	 	for i in 1 : _M
 		 t2 = T_heater_scan[i]
 		 _a = fix_second_temperature(em_stray_rad , t2) # fixing source temperature returns SpectralQuantity
-		for j in 1 : _N
+		Threads.@threads for j in 1 : _N
 			t1 =  T_surf_scan[j]
-			t_meas =  p_selected( _a , t1 ,  e_int_iso )
+			t_meas =  p( _a , t1 ,  e )
 			ΔT_mat[i , j] = (t_meas - t1)/t1
 			Tmeas_mat[i , j] = t_meas
-			t_stray_excluded = Pyrometers.stray_radiation_corrected_temperature(p_selected , t_meas , e_int_iso , t2 , 1.0)
+			t_stray_excluded = Pyrometers.stray_radiation_corrected_temperature(p , t_meas , e , t2 , 1.0)
 			exclution_error[i , j] = (t_stray_excluded - t1)/t1
 		end
 	end
-	p_selected
+	return (T_surf_scan, T_heater_scan  , ΔT_mat ,Tmeas_mat ,  exclution_error)
+end
+
+# ╔═╡ 10298d52-d411-475f-b7f6-8562ed2a25bc
+if is_recalculate 
+
+	(T_surf_scan, T_heater_scan , ΔT_mat ,Tmeas_mat ,  exclution_error)  = evaluate_temperature_error(p_selected , e_int_iso)
+	
 end
 
 # ╔═╡ 0cb50b02-ab41-416c-8610-c3ff318b117b
 if is_recalculate 
-	if is_use_plotly
-		tr2 = PlutoPlotly.surface(x = T_heater_scan , y = T1_scan, z=100.0 * ΔT_mat, colorscale="Viridis")
-		
-		layout2 = Layout(
-    		width=800, 
-    		height=600, 
-    		autosize=true,
-    		margin=attr(l=0, r=0, b=0, t=50),  # Minimize margins
-    		scene=attr(
-        		yaxis_title="T образца",
-            	xaxis_title="T лампы", 
-            	zaxis_title="100%*ΔT/T1"
-
-    		)
-		)
-		p_res = PlutoPlotly.plot(tr2 , layout2)
-	else
-		p_res = Plots.surface(T_surf_scan, T_heater_scan , 100.0*ΔT_mat )
-	end
+	p_res = Plots.surface(T_surf_scan, T_heater_scan , 100.0*ΔT_mat )
 end
 
 # ╔═╡ 3e19d251-91f6-4383-bfc8-ffe816570f42
@@ -681,34 +679,11 @@ if is_recalculate
 	pretty_table(HTML , out_table_T )
 end
 
-# ╔═╡ abf9e80e-49e9-4a35-bc68-bb6c4260fa94
-em1 = MixedRadiationEmitter(e_int_iso)
-
-# ╔═╡ fc3be34a-381b-4735-b201-9479eb43ee43
-em1(2.3 , 1300 , 1800)
-
-# ╔═╡ 2bbe7963-d294-41d3-a308-2a4cf1fddb58
-a = fix_second_temperature(em1 , 1800)
-
-# ╔═╡ c656e557-5654-47a8-b461-dfce564148d2
-@benchmark $p_selected( $a , 1200 )
-
-# ╔═╡ b94fca1d-2416-44ff-9e41-40f876fc6b0e
-T_measured = p_selected( a , 1200.0 ,  e_int_iso ) # 1200 is the true temperature 
-
-# ╔═╡ 92edb9f4-cb2b-4a73-85df-197ec6c1a872
-incident_radiation = Pyrometers.PlanckEmitter()
-
-# ╔═╡ 19236d96-33ab-4495-a7eb-697ff5bb43e5
-Pyrometers.stray_radiation_corrected_temperature(p_selected , T_measured , e_int_iso , 1800.0 , 1.0)
-
-# ╔═╡ 5e64a74b-fe14-4461-871b-6b609b5e83cd
-plot(λ_show , em1.(λ_show , 300 , 2800))
-
 # ╔═╡ Cell order:
 # ╠═30743a02-c643-4bdc-837e-b97299f9520a
 # ╠═5e712312-0fc7-4205-84cc-834d57b814a3
 # ╠═abdc809b-b53c-4dff-ba6f-c636c73f3fca
+# ╠═bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
 # ╠═05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
 # ╠═171409eb-22b5-4bc5-a8e2-eac0932a24f3
 # ╟─d5ee3913-66be-47d7-a755-699ba64b4f98
@@ -736,39 +711,35 @@ plot(λ_show , em1.(λ_show , 300 , 2800))
 # ╟─c5ac80ee-8143-4c28-bbff-2ac761c71fac
 # ╟─0c9fe7b1-374c-4fb8-9cfe-9337389713bf
 # ╟─bc2d93ae-6c30-462c-96e0-30fdb84d7c63
-# ╠═d3199b6e-9779-4def-b701-fe85d1035045
+# ╟─d3199b6e-9779-4def-b701-fe85d1035045
 # ╠═8a6fe87d-0f7c-4577-9ac2-ea1ecf71016b
 # ╟─72947d97-0a97-4064-a2fe-08d19dec0f0e
 # ╟─9ce196c1-8915-46da-9aba-f13d7655959a
-# ╟─3581aa29-714b-422a-8feb-d1a0c3ebeec7
-# ╟─86af6afc-b28a-4e84-952a-bd29710374f8
-# ╟─efc35420-d0e6-4795-94b6-d43289b4de44
+# ╠═3581aa29-714b-422a-8feb-d1a0c3ebeec7
+# ╠═86af6afc-b28a-4e84-952a-bd29710374f8
+# ╠═efc35420-d0e6-4795-94b6-d43289b4de44
 # ╟─6342e92b-4434-4e4b-aa2f-56405277caed
 # ╟─f181980f-bf72-4468-8daa-9461c6c901e0
-# ╟─5dafdc88-bd40-4347-aa62-e841d15c1bd7
-# ╟─a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
-# ╟─18daa932-fd3a-4056-aa07-4dcf26c7d57a
+# ╠═5dafdc88-bd40-4347-aa62-e841d15c1bd7
+# ╠═a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
+# ╠═18daa932-fd3a-4056-aa07-4dcf26c7d57a
 # ╟─36ba2396-bb5e-4d22-a58e-9ab27cd18b2d
-# ╟─91bbd553-4e4a-431d-9d54-b0f4882fd426
+# ╠═91bbd553-4e4a-431d-9d54-b0f4882fd426
 # ╠═15f1519b-d924-4fa9-b212-eebba75c544a
 # ╟─cd9d9742-e9e6-47b9-afae-09e3018e7ebf
 # ╟─0404bf20-57a4-4c7c-bf23-70d3541a6787
 # ╟─8cef05a1-2974-4c38-b73e-fa706f347fcc
-# ╟─459f54a1-bbf0-4268-8bec-8142d436976a
-# ╟─1811e43c-f7db-47b1-9b83-bb38455d7db3
-# ╟─ac2343b5-6ea5-47b1-9c39-643cdf6d93af
+# ╟─10298d52-d411-475f-b7f6-8562ed2a25bc
+# ╠═459f54a1-bbf0-4268-8bec-8142d436976a
+# ╠═1811e43c-f7db-47b1-9b83-bb38455d7db3
+# ╠═ac2343b5-6ea5-47b1-9c39-643cdf6d93af
 # ╟─54339700-71fd-48bf-a2ef-0c3267b9d81b
 # ╟─7f76bc22-77c3-4eb3-9d49-588e653df2e7
 # ╟─a0197a9a-34bf-4a3e-af8a-c23ea777f482
 # ╟─7793976e-6714-4bc1-9d97-412dd2a67480
-# ╠═969907ad-0c38-4dfb-8e2d-ac25619fbe5f
 # ╟─48b184a0-b1df-461e-a3f5-3c8be72ab875
-# ╠═5b647454-e5fc-4c65-8a0a-8eb499955cc1
-# ╠═15429248-3b3e-4912-b4a6-25ed2e8b0ebb
+# ╟─98cfdb54-7338-401f-8dcb-fd7752a70e0e
 # ╟─baeafd9c-19bc-4dda-ade2-89b8cf534f88
-# ╠═10298d52-d411-475f-b7f6-8562ed2a25bc
-# ╠═c656e557-5654-47a8-b461-dfce564148d2
-# ╠═c9634225-fa52-4747-8f45-3511141bd164
 # ╠═0cb50b02-ab41-416c-8610-c3ff318b117b
 # ╟─3e19d251-91f6-4383-bfc8-ffe816570f42
 # ╟─ce4f2fdd-16b1-46e8-88a4-a952896b6df8
@@ -776,7 +747,6 @@ plot(λ_show , em1.(λ_show , 300 , 2800))
 # ╟─05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 # ╠═e480137d-b6d9-4e18-92f0-640292bbb5f0
 # ╠═1c02bee4-29af-4a5f-8b83-0ee6d5e226be
-# ╠═e5ec9457-c744-4e47-a42a-e7dddeed13dc
 # ╠═abf9e80e-49e9-4a35-bc68-bb6c4260fa94
 # ╠═fc3be34a-381b-4735-b201-9479eb43ee43
 # ╠═2bbe7963-d294-41d3-a308-2a4cf1fddb58
@@ -784,3 +754,5 @@ plot(λ_show , em1.(λ_show , 300 , 2800))
 # ╠═92edb9f4-cb2b-4a73-85df-197ec6c1a872
 # ╠═19236d96-33ab-4495-a7eb-697ff5bb43e5
 # ╠═5e64a74b-fe14-4461-871b-6b609b5e83cd
+# ╠═ba559d2d-3bd0-4cd1-8836-8ab0b860c3a5
+# ╠═4f6c8a96-2347-496a-8d71-1d410fa30ac9

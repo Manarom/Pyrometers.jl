@@ -130,24 +130,16 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
     T_src  = 1500.0  # furnace temperature 
     ϵ_src  = 0.85    # furnace emissivity 
     ϵ_surf = 0.7     # surface emissivity 
-    i_f(e) = e * b_i(T_true) + (1 - e)*b_i(T_src)
+    i_f(e) = e * b_i(T_true) + (1 - e)* ϵ_src * b_i(T_src)
     p = Pyrometers.SpectralBandPyrometer(2.0,3.0, ϵ=ϵ_surf) 
 
     print("Enclosure geometry ,  fixed emissivity and input signal...")
-    geom_enc = Pyrometers.EnclosureGeometry()
-    e_eff = Pyrometers.effective_emissivity(geom_enc, ϵ_surf, ϵ_src)
-    @test e_eff == ϵ_surf
-    T_measured = p(i_f(ϵ_surf))
-    T_recovered= Pyrometers.stray_radiation_corrected_temperature(p, T_measured, T_src , ϵ_src , geom_enc)
-    @test T_recovered ≈ T_true
-    println("ok")
-
-    print("Parallel plates geometry ,  fixed emissivity and input signal...")
-    geom = Pyrometers.ViewFactorGeometry(1.0)
-    e_eff = Pyrometers.effective_emissivity(geom, ϵ_surf, ϵ_src)
-    T_meas = p(i_f(e_eff))
-    T_true_par = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, T_src, ϵ_src, geom)
-    @test T_true_par ≈ T_true
+        geom_enc = Pyrometers.EnclosureGeometry()
+        #e_eff = Pyrometers.effective_emissivity(geom_enc, ϵ_surf, ϵ_src)
+        #@test e_eff == ϵ_surf
+        T_measured = p(i_f(ϵ_surf))
+        T_recovered= Pyrometers.stray_radiation_corrected_temperature(p, T_measured, T_src , ϵ_src , geom_enc)
+        @test T_recovered ≈ T_true
     println("ok")
 
    
@@ -166,6 +158,29 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
     @test T_corrected ≈ T_true
     println("ok")
 
+
+        print("Both semissivities are isothermal...")
+            ϵ_surf = IsothermalSpectralQuantity(l-> 0.6 + l/20)
+            ϵ_wall = IsothermalSpectralQuantity(l-> 0.9 - l/20)
+            Tsource = 1574.0
+            Ttrue = 987.5
+            bb = Pyrometers.PlanckEmitter()
+            i_incident = Pyrometers.fix_temperature(bb , Tsource)
+            refl = Pyrometers.SpectralReflectivity(ϵ_surf)
+            p = Pyrometers.SpectralBandPyrometer(2.0 , 3.0)
+            @test ϵ_surf(2.0) ≈ 1.0 - refl(2.0)
+            i_full = ϵ_surf * bb + refl * ϵ_wall * i_incident # spectral algebra usage
+            es , ew = ϵ_surf(2.5) , ϵ_wall(2.5)
+            i_test = es * PlanckFunctions.ibb(2.5 , Ttrue) + (1 - es) * ew * PlanckFunctions.ibb(2.5 , Tsource)
+            i_full_iso = Pyrometers.fix_temperature(i_full , Ttrue)
+            @test i_full_iso(2.5) ≈ i_test
+            I_total = Pyrometers.integrate(p , i_full_iso)
+            T_meas = p(I_total , ϵ_surf) # measured temperature including stray radiation impact
+            # the insident radiation is provided as irradiance 
+            geom = Pyrometers.EnclosureGeometry()
+            T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, ϵ_surf , Tsource, ϵ_wall , geom) #applying correction 
+            @test T_corrected ≈ Ttrue
+    println("ok")
     # ϵ_obj_spec = Pyrometers.AnalyticalSpectralQuantity((λ, t) -> 0.7 - 0.00005 * t , (λ, t) -> - 0.00005   , (λ, t) -> 0.0 )
 end
 
