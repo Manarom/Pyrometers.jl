@@ -1,5 +1,5 @@
 using Pyrometers , PlanckFunctions
-using ForwardDiff , Zygote , QuadGK , ADTypes
+using ForwardDiff , Zygote , QuadGK , ADTypes , DataInterpolations
 using Test
 
 
@@ -138,24 +138,24 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
         #e_eff = Pyrometers.effective_emissivity(geom_enc, ϵ_surf, ϵ_src)
         #@test e_eff == ϵ_surf
         T_measured = p(i_f(ϵ_surf))
-        T_recovered= Pyrometers.stray_radiation_corrected_temperature(p, T_measured, T_src , ϵ_src , geom_enc)
+        T_recovered= Pyrometers.external_source_corrected_temperature(p, T_measured, T_src , ϵ_src , geom_enc)
         @test T_recovered ≈ T_true
     println("ok")
 
    
     print("Fixed surface emissivity incident radiation is provided as a function of wavelength...")
-    ϵ_surf = p.ϵ[]
-    bb = Pyrometers.PlanckEmitter()
-    i_incident = Pyrometers.fix_temperature(bb , 1500.0)
-    
-    i_full = ϵ_surf * bb + (1 - ϵ_surf) * i_incident 
-    i_full_iso = Pyrometers.fix_temperature(i_full , T_true)
-    I_total = Pyrometers.integrate(p , i_full_iso)
-    T_meas = p(I_total) # measured temperature including stray radiation impact
-    # the insident radiation is provided as irradiance 
-    T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, i_incident) #applying correction 
+        ϵ_surf = p.ϵ[]
+        bb = Pyrometers.PlanckEmitter()
+        i_incident = Pyrometers.fix_temperature(bb , 1500.0)
+        
+        i_full = ϵ_surf * bb + (1 - ϵ_surf) * i_incident 
+        i_full_iso = Pyrometers.fix_temperature(i_full , T_true)
+        I_total = Pyrometers.integrate(p , i_full_iso)
+        T_meas = p(I_total) # measured temperature including stray radiation impact
+        # the insident radiation is provided as irradiance 
+        T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, i_incident) #applying correction 
 
-    @test T_corrected ≈ T_true
+        @test T_corrected ≈ T_true
     println("ok")
 
 

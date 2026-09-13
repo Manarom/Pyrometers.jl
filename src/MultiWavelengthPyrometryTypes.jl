@@ -1,5 +1,5 @@
 
-# BandPyrometryTypes should be included in the BandPyrometry module
+# MultiwavlengthPyrometryTypes should be included in the MultiwavlengthPyrometry module
 
 #function 
 """
@@ -63,10 +63,10 @@ end
 #VanderMatrix(em::EmPoint,vv::Val{CN};poly_type::Symbol = :stand) where CN = VanderMatrix(em.λ,vv,poly_type = poly_type)
 
 """
-    BandPyrometryPoint type stores data of thermal emission spectrum of a real body with 
+    MultiwavlengthPyrometryPoint type stores data of thermal emission spectrum of a real body with 
 emissivity polynomial approximation, and  its first and second derivatives
 it also stores "measurements" vector which further can be fitted, it also 
-provides the constructor BandPyrometryPoint(I_measured,λ,initial_x,polynomial_type) 
+provides the constructor MultiwavelengthPyrometer(I_measured,λ,initial_x,polynomial_type) 
 where:
     -  I_measured is a measured spectrum
     -  λ - wavelength vector (in μm)
@@ -84,7 +84,7 @@ Pm1 - P-1 number of parameters approximating
 NxPm1 - N*(P-1) number of vandermatrix elements
 T - type of data
 """
-struct BandPyrometryPoint{N , Nx3 ,P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}#{N,P,T} # N - wavelength number, CN - parameters number + 1
+struct MultiwavelengthPyrometer{N , Nx3 ,P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}#{N,P,T} # N - wavelength number, CN - parameters number + 1
     # N , Nx3 , P, NxP, PxP, Pm1 , NxCN, CNxCN , T
     # Stores data about the spectral band, BBemission spectrum and experimental measured spectrum
     e_p::EmPoint{N,Nx3,T} 
@@ -107,7 +107,7 @@ struct BandPyrometryPoint{N , Nx3 ,P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}#{N,P,T
     is_has_Iₛᵤᵣ::Bool # flag 
 
 """
-    BandPyrometryPoint(measured_Intensity::AbstractVector,
+    MultiwavelengthPyrometer(measured_Intensity::AbstractVector,
                         λ::AbstractVector,
                         initial_x::AbstractVector;
                         polynomial_type::Symbol="stand",
@@ -118,7 +118,7 @@ Constructor for band pyrometry fitting,
     initial_x - starting optimization vector 
     polynomial_type - type of polynomial for emissivity approximation
 """
-function BandPyrometryPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
+function MultiwavelengthPyrometer(measured_Intensity::StaticArray{Tuple{N},T,1},
                         λ::StaticArray{Tuple{N},T,1},
                         initial_x::StaticArray{Tuple{P},T,1};
                         polynomial_type::Symbol=:stand,
@@ -172,11 +172,11 @@ function BandPyrometryPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
 end
 
 temperature(emp::EmPoint) = emp.Tib[]
-temperature(bp::BandPyrometryPoint) = bp.e_p.Tib[]
+temperature(bp::MultiwavelengthPyrometer) = bp.e_p.Tib[]
 
-pointsnumber(::Union{EmPoint{N},BandPyrometryPoint{N}}) where N = N
-parnumber(::BandPyrometryPoint{N, Nx3, P}) where  {N, Nx3, P} = P
+pointsnumber(::Union{EmPoint{N},MultiwavelengthPyrometer{N}}) where N = N
+parnumber(::MultiwavelengthPyrometer{N, Nx3, P}) where  {N, Nx3, P} = P
 parnumber(::EmPoint) = 1
-degrees_of_freedom(p::Union{EmPoint,BandPyrometryPoint}) = pointsnumber(p) - parnumber(p)
-emissivity(p::BandPyrometryPoint) = copy(p.ϵ)
+degrees_of_freedom(p::Union{EmPoint,MultiwavelengthPyrometer}) = pointsnumber(p) - parnumber(p)
+emissivity(p::MultiwavelengthPyrometer) = copy(p.ϵ)
 #emissivity(p::BandPyrometryPoint,λ::AbstractVector) = 

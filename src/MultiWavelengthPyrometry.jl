@@ -1,5 +1,5 @@
 
-module BandPyrometry
+module MultiwavelengthPyrometry
     using LinearAlgebra, #
     MKL, # using MKL turns default LinearAlgebra from library from openBLAS to mkl  
     Optimization,
@@ -13,11 +13,11 @@ module BandPyrometry
     using ScaledPolynomials
 
     import PlanckFunctions as Planck
-    include("BandPyrometryTypes.jl") # Brings types and functions for working with types
+    include("MultiwavelengthPyrometryTypes.jl") # Brings types and functions for working with types
     #include("Pyrometers.jl") 
     const NPOINT = 30
 
-    export  BandPyrometryPoint,# type for least-square fitting 
+    export  MultiwavelengthPyrometer,# type for least-square fitting 
             EmPoint, # type for BB temperature fitting
             fit_T!,# function to fit the BB and real surface temperature
             Pyrometers, # pyrometers module
@@ -94,11 +94,11 @@ Input:
     end
     ## BAND PYROMETRY POINT METHODS
     """
-    box_constraints(bp::BandPyrometryPoint)
+    box_constraints(bp::MultiwavelengthPyrometer)
 
 Evaluates box-constraint of the problem
 """
-    function evaluate_box_constraints(bp::BandPyrometryPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T},
+    function evaluate_box_constraints(bp::MultiwavelengthPyrometer{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T},
          emissivity_range::B = nothing,
          temperature_range::C=nothing)  where {B <: Union{Nothing , NTuple{2 , T} , NTuple{2 , <: Union{NTuple{Pm1 ,T} , StaticVector{Pm1 , T}} } } , C <: Union{Nothing,NTuple{2,T}} } where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
         # method calculates box constraints 
@@ -112,20 +112,20 @@ Evaluates box-constraint of the problem
             (lb[end], ub[end]) = isnothing(temperature_range) ? extract_temperature_range(bp,emissivity_range) : (first(temperature_range),last(temperature_range))
         return (lb=lb , ub=ub)
     end
-    extract_temperature_range(::BandPyrometryPoint,::Nothing) = DEFAULT_TEMPERATURE_RANGE[]
-    function extract_temperature_range(p::BandPyrometryPoint , e_range::NTuple{2 , <: Union{NTuple , StaticVector} } )
+    extract_temperature_range(::MultiwavelengthPyrometer,::Nothing) = DEFAULT_TEMPERATURE_RANGE[]
+    function extract_temperature_range(p::MultiwavelengthPyrometer , e_range::NTuple{2 , <: Union{NTuple , StaticVector} } )
         lb = first(e_range)
         ub = last(e_range)
         return extract_temperature_range(p , (minimum(lb) , maximum(ub)))
     end
-    function extract_temperature_range(p::BandPyrometryPoint , emissivity_range::NTuple{2,T}) where T
+    function extract_temperature_range(p::MultiwavelengthPyrometer , emissivity_range::NTuple{2,T}) where T
         return ( last(emissivity_range) |> p.e_p, first(emissivity_range) |> p.e_p) # the lower and the upper limits on temperature
     end
     
     """
     em_cons!(constraint_value::AbstractArray,
                             x::AbstractVector, 
-                            bp::BandPyrometryPoint)
+                            bp::MultiwavelengthPyrometer)
 
 
 In-place filling of two-elemnt vector of [minimum,maximum] emissivity in the whole 
@@ -138,7 +138,7 @@ Inputs:
 """
     function em_cons!(constraint_value::AbstractArray,
                             x::AbstractVector, 
-                            bp::BandPyrometryPoint)
+                            bp::MultiwavelengthPyrometer)
         # evaluate the constraints on emissivity (it should not be greater than one in a whole spectra range)
         feval!(bp,x)  
         constraint_value.=extrema(bp.ϵ) # (minimum,maximum) values of the emissivity 
@@ -146,7 +146,7 @@ Inputs:
         #   in a whole spectrum range
     end
     """
-    emissivity!(bp::BandPyrometryPoint,x::AbstractVector)
+    emissivity!(bp::MultiwavelengthPyrometer,x::AbstractVector)
 
 
 Fills emissivity for the current BandPyrometry point
@@ -160,12 +160,12 @@ Input:
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature   
 """
-    function emissivity!(bp::BandPyrometryPoint,x::AbstractVector)
+    function emissivity!(bp::MultiwavelengthPyrometer,x::AbstractVector)
         a = @view x[1:end-1] #emissivity approximation variables
         return mul!(bp.ϵ, bp.vandermonde.v,a)
     end
     """
-    feval!(bp::BandPyrometryPoint,x::AbstractVector)
+    feval!(bp::MultiwavelengthPyrometer,x::AbstractVector)
 
 Fills both the emissivity and the thermal emission spectrum for the current BandPyrometry point
 
@@ -174,7 +174,7 @@ Input:
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature
 """
-    function feval!(bp::BandPyrometryPoint,x::AbstractVector)
+    function feval!(bp::MultiwavelengthPyrometer,x::AbstractVector)
         # evaluates residual vector
         #a = @view x[1:end-1] #emissivity approximation variables
         feval!(bp.e_p , x[end]) # refreshes planck function values
@@ -190,7 +190,7 @@ Input:
         return bp.Ic
     end
     """
-    residual!(bp::BandPyrometryPoint,x::AbstractVector)
+    residual!(bp::MultiwavelengthPyrometer,x::AbstractVector)
 
 Fills emissivity, thermal emission spectrum and evaluates the residuals vector 
 for the current BandPyrometry point
@@ -200,7 +200,7 @@ Input:
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature    
 """
-    function residual!(bp::BandPyrometryPoint,x::AbstractVector)
+    function residual!(bp::MultiwavelengthPyrometer,x::AbstractVector)
         feval!(bp,x)   # feval! calculates function value only if current x is not the same as 
         @. bp.r =bp.e_p.I_measured - bp.Ic # measured data - calculated 
         bp.e_p.r[] = 0.5*norm(bp.r)^2 # discrepancy value
@@ -208,7 +208,7 @@ Input:
     end
     
     """
-    disc(x::AbstractVector,bp::BandPyrometryPoint)
+    disc(x::AbstractVector,bp::MultiwavelengthPyrometer)
 
 Fills emissivity, thermal emission spectrum,evaluates the residuals vector
 and calculates its norm for the current BandPyrometry point
@@ -223,13 +223,13 @@ Input:
     where a1...an - emissivity approximations coefficients, T  - temperature 
     bp - (modified) current spectral band pytometry point
 """
-    function  disc(x::AbstractVector,bp::BandPyrometryPoint)
+    function  disc(x::AbstractVector,bp::MultiwavelengthPyrometer)
         residual!(bp,x)
         return bp.e_p.r[]# returns current value of discrepancy
     end
 
 """
-    jacobian!(x::AbstractVector,bp::BandPyrometryPoint)
+    jacobian!(x::AbstractVector,bp::MultiwavelengthPyrometer)
 
 Fills the Jacobian matrix for current bandpyrometry point
 Input:
@@ -242,7 +242,7 @@ Input:
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified, stores Jacobian internally) current spectral band pytometry point 
 """
-function jacobian!(x::AbstractVector,bp::BandPyrometryPoint) # evaluates Planck function
+function jacobian!(x::AbstractVector,bp::MultiwavelengthPyrometer) # evaluates Planck function
         ∇!(x[end],bp.e_p) # refresh Planck function first derivative
         if x!=bp.x_jac_vec
             J1 = @view bp.jacobian[:,1:end-1] # Jacobian without temperature derivatives
@@ -255,16 +255,16 @@ function jacobian!(x::AbstractVector,bp::BandPyrometryPoint) # evaluates Planck 
     end   
 
     """
-    grad!(g::AbstractVector,x::AbstractVector,bp::BandPyrometryPoint)
+    grad!(g::AbstractVector,x::AbstractVector,bp::MultiwavelengthPyrometer)
 
-In-place filling of the gradient vector of BandPyrometryPoint at point x
+In-place filling of the gradient vector of MultiwavelengthPyrometer at point x
 Input:
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified, recalculates residual vector and Jacobian if the 
     currently stored value was obtaibed for another optimization variables array)
     current spectral band pytometry point     
-In-place filling of the gradient vector of BandPyrometryPoint at point x
+In-place filling of the gradient vector of MultiwavelengthPyrometer at point x
 Input:
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature
@@ -272,7 +272,7 @@ Input:
     currently stored value was obtaibed for another optimization variables array)
     current spectral band pytometry point     
 """
-    function grad!(g::AbstractVector,x::AbstractVector,bp::BandPyrometryPoint)
+    function grad!(g::AbstractVector,x::AbstractVector,bp::MultiwavelengthPyrometer)
         residual!(bp,x)
         jacobian!(x,bp) # calculated Jₘ
         g .= - transpose(bp.jacobian) * bp.r # calculates gradient ∇f = -Jₘᵀ*r
@@ -280,10 +280,10 @@ Input:
     end
 
     """
-    hess_approx!(ha, x::AbstractVector,bp::BandPyrometryPoint)
+    hess_approx!(ha, x::AbstractVector,bp::MultiwavelengthPyrometer)
 
 In-place filling of the approximate hessian (Hₐ = Jᵀ*J (J - Jacobian)) 
-of BandPyrometryPoint at point vector x, approximate Hessian can be used 
+of MultiwavelengthPyrometer at point vector x, approximate Hessian can be used 
 in optimization methods to approximate the full Hessian (e.g. in Gauss-Newton
 or Levenberg-Marquardt methods)
 
@@ -293,7 +293,7 @@ Input:
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified) current spectral band pytometry point     
 """
-function hess_approx!(ha, x::AbstractVector,bp::BandPyrometryPoint)
+function hess_approx!(ha, x::AbstractVector,bp::MultiwavelengthPyrometer)
         # calculates approximate hessian which is Hₐ = Jᵀ*J (J - Jacobian)
         if x!=bp.x_hess_approx
             jacobian!(x,bp)
@@ -305,22 +305,22 @@ function hess_approx!(ha, x::AbstractVector,bp::BandPyrometryPoint)
         return nothing
     end
     """
-    hess!(h,x::AbstractVector,bp::BandPyrometryPoint)
+    hess!(h,x::AbstractVector,bp::MultiwavelengthPyrometer)
     
-In-place filling of the whole hessian matrix for BandPyrometryPoint at point x
+In-place filling of the whole hessian matrix for MultiwavelengthPyrometer at point x
 Input:
     ha - Hessian matrix to be filled in-place
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified) current spectral band pytometry point      
-In-place filling of the whole hessian matrix for BandPyrometryPoint at point x
+In-place filling of the whole hessian matrix for MultiwavelengthPyrometer at point x
 Input:
     ha - Hessian matrix to be filled in-place
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified) current spectral band pytometry point      
 """
-function hess!(h,x::AbstractVector,bp::BandPyrometryPoint)
+function hess!(h , x::AbstractVector , bp::MultiwavelengthPyrometer)
         if x != bp.x_hess_vec
             hess_approx!(bp.hessian,x,bp) # refresh the approximate hessian 
             # and fill hessian with approximate hessian Jᵀ*J
@@ -390,7 +390,7 @@ function feval!(e::EmPoint,t::Float64) # fills planck spectrum
         end
         return e.Ib
     end
-    residual!(e::EmPoint,T::AbstractArray) = residual!(e::EmPoint,T[end])
+    residual!(e::EmPoint , T::AbstractArray) = residual!(e::EmPoint,T[end])
 """
     residual!(e::EmPoint,t::Float64)
 
@@ -518,7 +518,7 @@ function hess!(h,t::Float64,e::EmPoint) # calculates hessian of a simple Planck 
     const LAGRANGE_OPTIM_FUN = OptimizationFunction(disc,grad=grad!,hess=hess!,cons=em_cons!)
     const OPTIM_FUN  = OptimizationFunction(disc,grad=grad!,hess=hess!) 
     """
-    fit_T!(point::Union{EmPoint,BandPyrometryPoint};
+    fit_T!(point::Union{EmPoint,MultiwavelengthPyrometer};
             optimizer_name::String="Default",
             is_box_constraint::Bool=false,
             is_lagrange_constraint::Bool=false, 
@@ -526,7 +526,7 @@ function hess!(h,t::Float64,e::EmPoint) # calculates hessian of a simple Planck 
             temperature_range::B=nothing) where {B <: Union{AbstractVector,Nothing,NTuple{2}},C <: Union{AbstractVector,Nothing,NTuple{2}}}
 
 Input:
-    point - (modified) real suraface (BandPyrometryPoint) of blackbody thermal emission object
+    point - (modified) real suraface (MultiwavelengthPyrometer) of blackbody thermal emission object
     (optional)
     optimizer_name - the name of optimizer must be the key of optim_dic
     is_constraint - is box-constraint flag
@@ -536,13 +536,13 @@ Returns:
         named tuple with (T - fitted temperature,
                             res - optimization output object,
                             optimizer - chosen optimizer)
-    if the point is of the BandPyrometryPoint type, the output is:
+    if the point is of the MultiwavelengthPyrometer type, the output is:
         named tuple with (T - fitted temperature ,a - fitted emissivity approximation coefficients,
                             ϵ - emissivity spectrum in the whole wavelemgth range,
                             res - optimization output object,
                             optimizer - chosen optimizer)                
 """
-function fit_T!(point::Union{EmPoint , BandPyrometryPoint};
+function fit_T!(point::Union{EmPoint , MultiwavelengthPyrometer};
             optimizer_name::String="Default",
             is_box_constraint::Bool=false,
             is_lagrange_constraint::Bool=false, 
@@ -584,12 +584,12 @@ function fit_T!(point::Union{EmPoint , BandPyrometryPoint};
                                 point; kwargs...)           
         end
         results = solve(probl,optimizer())
-        isa(point, BandPyrometryPoint) ? copyto!(point.x , results.u) : feval!(point,results.u)
+        isa(point, MultiwavelengthPyrometer) ? copyto!(point.x , results.u) : feval!(point,results.u)
         return  fitting_result(point, results, optimizer) 
                         
     end
     
-    fitting_result(point::BandPyrometryPoint,results,optimizer) = (T=temperature(point),a=results.u[1:end-1],
+    fitting_result(point::MultiwavelengthPyrometer,results,optimizer) = (T=temperature(point),a=results.u[1:end-1],
                                                                             ϵ=point.vandermonde*results.u[1:end-1],
                                                                             res=results,
                                                                             optimizer=optimizer)
@@ -606,14 +606,14 @@ function fit_T!(point::Union{EmPoint , BandPyrometryPoint};
         feval!(point,results.u)
         return (T=temperature(point), res=results, optimizer=DEFAULT_OPTIMIZER[])                 
     end
-    function fitT_default(point::BandPyrometryPoint)
+    function fitT_default(point::MultiwavelengthPyrometer)
         probl= OptimizationProblem(OPTIM_FUN, point.x,point)
         results = solve(probl,DEFAULT_OPTIMIZER[])   
         feval!(point,results.u)
         return (T=temperature(point), res=results, optimizer=DEFAULT_OPTIMIZER[])                 
     end
     function (emp::EmPoint)(I::AbstractVector) 
-        copyto!(emp.I_measured,I)
+        copyto!(emp.I_measured , I)
         return fitT_default(emp).T
     end
     function (emp::EmPoint)(eps::Number) 
@@ -623,22 +623,22 @@ function fit_T!(point::Union{EmPoint , BandPyrometryPoint};
         emp.I_measured .*= eps
         return T
     end
-    function (emp::BandPyrometryPoint)(I::AbstractVector)
+    function (emp::MultiwavelengthPyrometer)(I::AbstractVector)
         copyto!(emp.e_p.I_measured,I)
         return fitT_default(emp).T
     end
-    function (emp::Union{EmPoint,BandPyrometryPoint})()
+    function (emp::Union{EmPoint,MultiwavelengthPyrometer})()
         return fit_T!(emp).T
     end
     """
-    covariance(bp::BandPyrometryPoint)
+    covariance(bp::MultiwavelengthPyrometer)
 
 Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
 """
-function fitting_covariance(bp::BandPyrometryPoint{N,Nx3,P}) where {N,Nx3,P}
+function fitting_covariance(bp::MultiwavelengthPyrometer{N,Nx3,P}) where {N,Nx3,P}
     sigma_square = sumabs2(bp.e_p.ri)/degrees_of_freedom(bp)
     h = similar(bp.hessian)
-    hess!(h, bp.x, bp::BandPyrometryPoint)
+    hess!(h, bp.x, bp::MultiwavelengthPyrometer)
     return 2*sigma_square*inv(h)
 end
 """
@@ -654,12 +654,12 @@ function fitting_covariance(em::EmPoint{N,Nx3,T}) where {N,Nx3,T}
 end
 fitting_variance(em::EmPoint) = vec(fitting_covariance(em))
 """
-    fitting_variance(bp::BandPyrometryPoint)
+    fitting_variance(bp::MultiwavelengthPyrometer)
 
 Returns the optimization variable variance (diagonal of the covariance matrix)
 """
-fitting_variance(bp::BandPyrometryPoint) = collect(diag(fitting_covariance(bp)))
-fitting_error(p::Union{BandPyrometryPoint,EmPoint};probability = 0.95,only_std::Bool=false) =(only_std ? 1.0 : student_coefficient(degrees_of_freedom(p),probability))*sqrt.(fitting_variance(p))
+fitting_variance(bp::MultiwavelengthPyrometer) = collect(diag(fitting_covariance(bp)))
+fitting_error(p::Union{MultiwavelengthPyrometer,EmPoint};probability = 0.95,only_std::Bool=false) =(only_std ? 1.0 : student_coefficient(degrees_of_freedom(p),probability))*sqrt.(fitting_variance(p))
 """
     student_coefficient(degrees_of_freedom::Int, probability; digits::Int = 3, side::Int = 2)
 
@@ -697,7 +697,7 @@ end
             (m.λ,m.Ib)
         end
     end
-    @recipe function f(m::BandPyrometryPoint)
+    @recipe function f(m::MultiwavelengthPyrometer)
         minorgrid--> true
         gridlinewidth-->2
         dpi-->600

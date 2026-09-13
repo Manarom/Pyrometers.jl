@@ -15,26 +15,29 @@ QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 
+[weakdeps]
+ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
+DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
+
+[extensions]
+PyrometersDataInterpolationsExt = "DataInterpolations"
+PyrometersForwardDiffExt = "ForwardDiff"
+PyrometersZygoteExt = "Zygote"
+
 [compat]
 ADTypes = "1.23.0"
 PlanckFunctions = "1.1.4"
 QuadGK = "2.11.3"
 Roots = "3.0.6"
 
-[extensions]
-PyrometersForwardDiffExt = "ForwardDiff"
-PyrometersZygoteExt = "Zygote"
-
-[weakdeps]
-ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
-Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
-
 [extras]
-Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
 
 [targets]
-test = ["Test" , "ForwardDiff" , "Zygote" ,"QuadGK" , "ADTypes"]
+test = ["Test", "ForwardDiff", "Zygote", "QuadGK", "ADTypes", "DataInterpolations"]

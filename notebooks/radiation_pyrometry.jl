@@ -409,6 +409,17 @@ begin
 	e_int_iso = Pyrometers.IsothermalSpectralQuantity(eint)
 end;
 
+# ╔═╡ 6342e92b-4434-4e4b-aa2f-56405277caed
+begin 
+	ϵ  = e_int_iso.(λ2)
+	I1 = @. ϵ * Planck.ibb.(λ2 , T1)
+	I2 = @. (1.0 - ϵ) * Planck.ibb.(λ2 , T2)
+	I_measured =@. two_planck.(λ2 , ϵ , T1 , T2)
+end;
+
+# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
+md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
+
 # ╔═╡ 91bbd553-4e4a-431d-9d54-b0f4882fd426
 md"""
 Sample temperature  ``T_1 `` = $(@bind T1 Slider(300.0:1e-2:3000 , show_value = true , default = 1000.0)), K
@@ -422,52 +433,6 @@ External radiation temperature ``T_2`` = $(@bind T2 Slider(300.0:1e-2:4000 , sho
 
 # ╔═╡ 8cef05a1-2974-4c38-b73e-fa706f347fcc
 md" Show wavelength range: $(@bind λ_show RangeSlider(range(extrema(λ2)... , 1000)))"
-
-# ╔═╡ 1811e43c-f7db-47b1-9b83-bb38455d7db3
-pyrometers_vector2 = deepcopy(pyrometers_vector);
-
-# ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
-md" **Recalculate T matrix $(@bind is_recalculate CheckBox(false))**"
-
-# ╔═╡ 7f76bc22-77c3-4eb3-9d49-588e653df2e7
-md"""
-
-###### The following section calculates the `measured` temperature and relative error of temperature mesurement for selected or custom pyrometer type   
-
-"""
-
-# ╔═╡ a0197a9a-34bf-4a3e-af8a-c23ea777f482
-md" Use custom pyrometer : $(@bind use_custom CheckBox(default = false))"
-
-# ╔═╡ 7793976e-6714-4bc1-9d97-412dd2a67480
-@bind custom_waves PlutoUI.combine() do Child
-
-md"""
-	
-Custom pyrometer wavelength range:
-
-λleft = $(Child("left", NumberField(0.1:1e-3:20 , default = 8.0)))
-
-λright = $(Child("right", NumberField(0.1:1e-3:20 , default = 9.7)))
-
-"""
-end
-
-# ╔═╡ e480137d-b6d9-4e18-92f0-640292bbb5f0
-function two_planck(l , ϵ , T1 , T2)
-	return ϵ * Planck.ibb(l , T1) + (1.0 - ϵ) * Planck.ibb(l , T2)
-end
-
-# ╔═╡ 6342e92b-4434-4e4b-aa2f-56405277caed
-begin 
-	ϵ  = e_int_iso.(λ2)
-	I1 = @. ϵ * Planck.ibb.(λ2 , T1)
-	I2 = @. (1.0 - ϵ) * Planck.ibb.(λ2 , T2)
-	I_measured =@. two_planck.(λ2 , ϵ , T1 , T2)
-end;
-
-# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
-md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
 
 # ╔═╡ 459f54a1-bbf0-4268-8bec-8142d436976a
 begin 
@@ -503,6 +468,41 @@ em_plot
 
 # ╔═╡ 18daa932-fd3a-4056-aa07-4dcf26c7d57a
 ppp
+
+# ╔═╡ 1811e43c-f7db-47b1-9b83-bb38455d7db3
+pyrometers_vector2 = deepcopy(pyrometers_vector);
+
+# ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
+md" **Recalculate T matrix $(@bind is_recalculate CheckBox(false))**"
+
+# ╔═╡ 7f76bc22-77c3-4eb3-9d49-588e653df2e7
+md"""
+
+###### The following section calculates the `measured` temperature and relative error of temperature mesurement for selected or custom pyrometer type   
+
+"""
+
+# ╔═╡ a0197a9a-34bf-4a3e-af8a-c23ea777f482
+md" Use custom pyrometer : $(@bind use_custom CheckBox(default = false))"
+
+# ╔═╡ 7793976e-6714-4bc1-9d97-412dd2a67480
+@bind custom_waves PlutoUI.combine() do Child
+
+md"""
+	
+Custom pyrometer wavelength range:
+
+λleft = $(Child("left", NumberField(0.1:1e-3:20 , default = 8.0)))
+
+λright = $(Child("right", NumberField(0.1:1e-3:20 , default = 9.7)))
+
+"""
+end
+
+# ╔═╡ e480137d-b6d9-4e18-92f0-640292bbb5f0
+function two_planck(l , ϵ , T1 , T2)
+	return ϵ * Planck.ibb(l , T1) + (1.0 - ϵ) * Planck.ibb(l , T2)
+end
 
 # ╔═╡ 0404bf20-57a4-4c7c-bf23-70d3541a6787
 begin 
@@ -583,22 +583,14 @@ begin
 end
 
 # ╔═╡ abf9e80e-49e9-4a35-bc68-bb6c4260fa94
-em1 = MixedRadiationEmitter(e_int_iso)
-
-# ╔═╡ fc3be34a-381b-4735-b201-9479eb43ee43
-em1(2.3 , 1300 , 1800)
-
-# ╔═╡ 2bbe7963-d294-41d3-a308-2a4cf1fddb58
-a = fix_second_temperature(em1 , 1800)
-
-# ╔═╡ b94fca1d-2416-44ff-9e41-40f876fc6b0e
-T_measured = p_selected( a , 1200.0 ,  e_int_iso ) # 1200 is the true temperature 
-
-# ╔═╡ 92edb9f4-cb2b-4a73-85df-197ec6c1a872
-incident_radiation = Pyrometers.PlanckEmitter()
-
-# ╔═╡ 19236d96-33ab-4495-a7eb-697ff5bb43e5
-Pyrometers.stray_radiation_corrected_temperature(p_selected , T_measured , e_int_iso , 1800.0 , 1.0)
+begin 
+	em1 = MixedRadiationEmitter(e_int_iso)
+	em1(2.3 , 1300 , 1800)
+	a = fix_second_temperature(em1 , 1800)
+	T_measured = p_selected( a , 1200.0 ,  e_int_iso ) # 1200 is the true temperature 
+	incident_radiation = Pyrometers.PlanckEmitter()
+	Pyrometers.external_source_corrected_temperature(p_selected , T_measured , e_int_iso , 1800.0 , 1.0 , Pyrometers.EnclosureGeometry())
+end
 
 # ╔═╡ 5e64a74b-fe14-4461-871b-6b609b5e83cd
 plot(λ_show , em1.(λ_show , 300 , 2800))
@@ -748,11 +740,6 @@ end
 # ╠═e480137d-b6d9-4e18-92f0-640292bbb5f0
 # ╠═1c02bee4-29af-4a5f-8b83-0ee6d5e226be
 # ╠═abf9e80e-49e9-4a35-bc68-bb6c4260fa94
-# ╠═fc3be34a-381b-4735-b201-9479eb43ee43
-# ╠═2bbe7963-d294-41d3-a308-2a4cf1fddb58
-# ╠═b94fca1d-2416-44ff-9e41-40f876fc6b0e
-# ╠═92edb9f4-cb2b-4a73-85df-197ec6c1a872
-# ╠═19236d96-33ab-4495-a7eb-697ff5bb43e5
 # ╠═5e64a74b-fe14-4461-871b-6b609b5e83cd
 # ╠═ba559d2d-3bd0-4cd1-8836-8ab0b860c3a5
 # ╠═4f6c8a96-2347-496a-8d71-1d410fa30ac9
