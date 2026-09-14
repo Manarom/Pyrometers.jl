@@ -409,17 +409,6 @@ begin
 	e_int_iso = Pyrometers.IsothermalSpectralQuantity(eint)
 end;
 
-# ╔═╡ 6342e92b-4434-4e4b-aa2f-56405277caed
-begin 
-	ϵ  = e_int_iso.(λ2)
-	I1 = @. ϵ * Planck.ibb.(λ2 , T1)
-	I2 = @. (1.0 - ϵ) * Planck.ibb.(λ2 , T2)
-	I_measured =@. two_planck.(λ2 , ϵ , T1 , T2)
-end;
-
-# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
-md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
-
 # ╔═╡ 91bbd553-4e4a-431d-9d54-b0f4882fd426
 md"""
 Sample temperature  ``T_1 `` = $(@bind T1 Slider(300.0:1e-2:3000 , show_value = true , default = 1000.0)), K
@@ -433,41 +422,6 @@ External radiation temperature ``T_2`` = $(@bind T2 Slider(300.0:1e-2:4000 , sho
 
 # ╔═╡ 8cef05a1-2974-4c38-b73e-fa706f347fcc
 md" Show wavelength range: $(@bind λ_show RangeSlider(range(extrema(λ2)... , 1000)))"
-
-# ╔═╡ 459f54a1-bbf0-4268-8bec-8142d436976a
-begin 
-	common_kwargs = (; fillrange=0, fillalpha=0.3,dpi=600,legend_background_color=:white, legend_foreground_color = :black, legend_position=:right , grid = true, gridlinewidth=3, gridstyle = :dot,minorgrid=true, box = :on, linewidth = 3)
-	
-	(xmin , xmax) = extrema(λ_show)
-	fl =@. (xmin <= λ2) & (λ2 <= xmax)
-	y_lims = extrema(I_measured[fl])
-	
-	
-	em_plot = Plots.plot(λ2 , eint.(λ2)  , label = nothing , title = emissivity_type; common_kwargs...)
-
-	
-	
-	ppp = Plots.plot(λ2 , I_measured  , label = "sum" ; common_kwargs...)
-	Plots.plot!(ppp, λ2 , I1  , label = "Tsample"  ; common_kwargs...)
-	Plots.plot!(ppp, λ2 , I2  , label = "Tlamp" ; common_kwargs...)
-	
-	
-	ylabel!(ppp , " I , , W/m²⋅sr⋅μm")
-	ylabel!(em_plot , " ϵ")
-	ylims!(ppp , y_lims)
-	ylims!(em_plot , (0.0,1.0))
-	for p in (ppp , em_plot)
-		xlabel!(p , " λ , μm ")
-		xlims!(p , (xmin , xmax))
-		
-	end
-end
-
-# ╔═╡ 5dafdc88-bd40-4347-aa62-e841d15c1bd7
-em_plot
-
-# ╔═╡ 18daa932-fd3a-4056-aa07-4dcf26c7d57a
-ppp
 
 # ╔═╡ 1811e43c-f7db-47b1-9b83-bb38455d7db3
 pyrometers_vector2 = deepcopy(pyrometers_vector);
@@ -503,6 +457,52 @@ end
 function two_planck(l , ϵ , T1 , T2)
 	return ϵ * Planck.ibb(l , T1) + (1.0 - ϵ) * Planck.ibb(l , T2)
 end
+
+# ╔═╡ 6342e92b-4434-4e4b-aa2f-56405277caed
+begin 
+	ϵ  = e_int_iso.(λ2)
+	I1 = @. ϵ * Planck.ibb.(λ2 , T1)
+	I2 = @. (1.0 - ϵ) * Planck.ibb.(λ2 , T2)
+	I_measured =@. two_planck.(λ2 , ϵ , T1 , T2)
+end;
+
+# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
+md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
+
+# ╔═╡ 459f54a1-bbf0-4268-8bec-8142d436976a
+begin 
+	common_kwargs = (; fillrange=0, fillalpha=0.3,dpi=600,legend_background_color=:white, legend_foreground_color = :black, legend_position=:right , grid = true, gridlinewidth=3, gridstyle = :dot,minorgrid=true, box = :on, linewidth = 3)
+	
+	(xmin , xmax) = extrema(λ_show)
+	fl =@. (xmin <= λ2) & (λ2 <= xmax)
+	y_lims = extrema(I_measured[fl])
+	
+	
+	em_plot = Plots.plot(λ2 , eint.(λ2)  , label = nothing , title = emissivity_type; common_kwargs...)
+
+	
+	
+	ppp = Plots.plot(λ2 , I_measured  , label = "sum" ; common_kwargs...)
+	Plots.plot!(ppp, λ2 , I1  , label = "Tsample"  ; common_kwargs...)
+	Plots.plot!(ppp, λ2 , I2  , label = "Tlamp" ; common_kwargs...)
+	
+	
+	ylabel!(ppp , " I , , W/m²⋅sr⋅μm")
+	ylabel!(em_plot , " ϵ")
+	ylims!(ppp , y_lims)
+	ylims!(em_plot , (0.0,1.0))
+	for p in (ppp , em_plot)
+		xlabel!(p , " λ , μm ")
+		xlims!(p , (xmin , xmax))
+		
+	end
+end
+
+# ╔═╡ 5dafdc88-bd40-4347-aa62-e841d15c1bd7
+em_plot
+
+# ╔═╡ 18daa932-fd3a-4056-aa07-4dcf26c7d57a
+ppp
 
 # ╔═╡ 0404bf20-57a4-4c7c-bf23-70d3541a6787
 begin 

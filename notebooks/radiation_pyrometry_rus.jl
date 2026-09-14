@@ -521,6 +521,18 @@ begin
 	ylabel!(all_emissivities , "Излучательная способность")
 end
 
+# ╔═╡ 35d4b5d4-099c-48b8-aeef-ecd252607229
+
+
+# ╔═╡ 31a59906-e0d8-4ae8-b1ca-34b9f01062c8
+all_emissivities_data
+
+# ╔═╡ 0cb1cfa0-6f2d-49bc-ac35-bb76688bb510
+
+
+# ╔═╡ ac15bdd0-7679-4511-b0be-4885f2d366bd
+
+
 # ╔═╡ d67ef942-be2d-4fad-91ba-eff9eda9d8e3
 begin 
 	p_in = Pyrometers.SpectralBandPyrometer(8.0 , 9.7 , type = :IN59)
@@ -604,6 +616,55 @@ if use_external_lamp && !isempty(interpolators_in_folder)
 	lamp_interpolator =JLD2.load(joinpath(interpolator_folder , interpolator_file_name))["lamp_interpolator"]
 	voltage_range = [100.0 , 140.0 , 180.0 , 220.0 , 240.0]
 end
+
+# ╔═╡ 8b441a27-004a-4468-b89f-f3a6cc6f9bbf
+begin #integral absorptivity with respect to the external radiation 
+	v = 100:20:240
+	A = OrderedDict{String , Vector{Float64}}()
+	for (k , e_int) in all_emissivities_data
+		_A_int = Vector{Float64}(undef , length(v))
+		_e_surf = Pyrometers.IsothermalSpectralQuantity(e_int)
+		for (i , vi) in enumerate(v) 
+				_lamp = Pyrometers.IsothermalSpectralQuantity(l->lamp_interpolator(l,vi))
+				denom = quadgk(_lamp , 0.4 , 15.0)
+				enum_iso = Pyrometers.fix_temperature(_e_surf * _lamp , 1000.0)
+				_enum  = quadgk(enum_iso , 0.4 , 15.0)
+				_A_int[i] = first(_enum)/ first(denom)
+		end
+		A[k] = _A_int
+	end
+
+
+end
+
+# ╔═╡ 6edddd01-915c-45bb-b3ef-155f4dcd9d8c
+first(A)
+
+# ╔═╡ bfce276c-389c-405c-a552-979ed38133a2
+begin 
+	p_A_int = Plots.plot(;plot_common_args...)
+	for (k,d) in A 
+		_a_avg = round(mean(d) , digits = 2)
+		nm = to_names[k]
+		Plots.plot!(p_A_int , v , d; plot_common_args... , label = nm*"($_a_avg)" , markersize=8 , markershape = :auto  , legend_position = :top)
+	end
+	p_A_int
+	ylims!(p_A_int , 0 , 1.3)
+	xlabel!(p_A_int , "Напряжение  на лампе, В")
+	ylabel!(p_A_int , "Поглощательная способность")
+end
+
+# ╔═╡ 0f0baa19-aa64-4daa-a501-861e22cdafde
+lamp_interpolator(2.1, 120)
+
+# ╔═╡ f3373768-d598-4d1e-b01b-1929e233f36a
+lamp_interpolator(2.1, 220)
+
+# ╔═╡ b27eff45-93e2-4aeb-a7ef-88132dd7e9e8
+ll2 = Pyrometers.IsothermalSpectralQuantity(l->lamp_interpolator(l,230))
+
+# ╔═╡ 4cc48476-fb0c-4a30-a93d-2e6caa53e232
+first(Pyrometers.quadgk(Pyrometers.fix_temperature(0.7*ll2 , 1400) , 0.1 , 15.0))/first(Pyrometers.quadgk(ll2 , 0.1 , 15.0))
 
 # ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
 md" **Пересчитать матрицу ошибки измерений $(@bind is_recalculate CheckBox(false))**"
@@ -1114,7 +1175,7 @@ StatsBase = "~0.34.13"
 PLUTO_MANIFEST_TOML_CONTENTS = """
 # This file is machine-generated - editing it directly is not advised
 
-julia_version = "1.12.5"
+julia_version = "1.12.7"
 manifest_format = "2.0"
 project_hash = "fbf27e2010d2ea000ee39c599fced5ec7b927e76"
 
@@ -1359,7 +1420,7 @@ version = "0.1.1"
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
-version = "1.3.0+1"
+version = "1.3.1+2"
 
 [[deps.CompositionsBase]]
 git-tree-sha1 = "802bb88cd69dfd1509f6670416bd4434015693ad"
@@ -2087,7 +2148,7 @@ version = "0.8.7+0"
 [[deps.OpenSSL_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "458c3c95-2e84-50aa-8efc-19380b2a3a95"
-version = "3.5.4+0"
+version = "3.5.6+0"
 
 [[deps.OpenSpecFun_jll]]
 deps = ["Artifacts", "CompilerSupportLibraries_jll", "JLLWrappers", "Libdl"]
@@ -3225,6 +3286,17 @@ version = "1.13.0+0"
 # ╠═da0a4a00-692a-4d29-97cb-74366e8374c9
 # ╠═90e15591-d885-48f3-bc46-cb9385c9ed13
 # ╠═afb61470-2455-4742-b81f-63baf5a4c3ce
+# ╠═8b441a27-004a-4468-b89f-f3a6cc6f9bbf
+# ╠═0f0baa19-aa64-4daa-a501-861e22cdafde
+# ╠═f3373768-d598-4d1e-b01b-1929e233f36a
+# ╠═6edddd01-915c-45bb-b3ef-155f4dcd9d8c
+# ╠═bfce276c-389c-405c-a552-979ed38133a2
+# ╠═35d4b5d4-099c-48b8-aeef-ecd252607229
+# ╠═31a59906-e0d8-4ae8-b1ca-34b9f01062c8
+# ╠═b27eff45-93e2-4aeb-a7ef-88132dd7e9e8
+# ╠═0cb1cfa0-6f2d-49bc-ac35-bb76688bb510
+# ╠═4cc48476-fb0c-4a30-a93d-2e6caa53e232
+# ╠═ac15bdd0-7679-4511-b0be-4885f2d366bd
 # ╠═d67ef942-be2d-4fad-91ba-eff9eda9d8e3
 # ╟─5dafdc88-bd40-4347-aa62-e841d15c1bd7
 # ╟─a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
