@@ -521,9 +521,6 @@ begin
 	ylabel!(all_emissivities , "Излучательная способность")
 end
 
-# ╔═╡ 35d4b5d4-099c-48b8-aeef-ecd252607229
-
-
 # ╔═╡ 31a59906-e0d8-4ae8-b1ca-34b9f01062c8
 all_emissivities_data
 
@@ -3284,15 +3281,14 @@ version = "1.13.0+0"
 # ╟─620dce38-97ce-495f-9b23-1b8290cbd973
 # ╟─b15bd3b0-0971-4b22-a109-0ed56afda615
 # ╠═da0a4a00-692a-4d29-97cb-74366e8374c9
-# ╠═90e15591-d885-48f3-bc46-cb9385c9ed13
-# ╠═afb61470-2455-4742-b81f-63baf5a4c3ce
-# ╠═8b441a27-004a-4468-b89f-f3a6cc6f9bbf
+# ╟─90e15591-d885-48f3-bc46-cb9385c9ed13
+# ╟─afb61470-2455-4742-b81f-63baf5a4c3ce
+# ╟─8b441a27-004a-4468-b89f-f3a6cc6f9bbf
 # ╠═0f0baa19-aa64-4daa-a501-861e22cdafde
 # ╠═f3373768-d598-4d1e-b01b-1929e233f36a
 # ╠═6edddd01-915c-45bb-b3ef-155f4dcd9d8c
-# ╠═bfce276c-389c-405c-a552-979ed38133a2
-# ╠═35d4b5d4-099c-48b8-aeef-ecd252607229
-# ╠═31a59906-e0d8-4ae8-b1ca-34b9f01062c8
+# ╟─bfce276c-389c-405c-a552-979ed38133a2
+# ╟─31a59906-e0d8-4ae8-b1ca-34b9f01062c8
 # ╠═b27eff45-93e2-4aeb-a7ef-88132dd7e9e8
 # ╠═0cb1cfa0-6f2d-49bc-ac35-bb76688bb510
 # ╠═4cc48476-fb0c-4a30-a93d-2e6caa53e232

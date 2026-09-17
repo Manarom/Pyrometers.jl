@@ -2,7 +2,7 @@
 
 julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "565c86ec16d78232192d771c1c13893192f1c9dd"
+project_hash = "eb7d38ce06e763a58e27964e7317eff6b37b6fd0"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -934,12 +934,13 @@ uuid = "43287f4e-b6f4-7ad1-bb20-aadabca52c3d"
 version = "1.4.0"
 
 [[deps.Pyrometers]]
-deps = ["ADTypes", "LinearAlgebra", "OrderedCollections", "PlanckFunctions", "QuadGK", "Roots", "StaticArrays"]
+deps = ["ADTypes", "LinearAlgebra", "OrderedCollections", "PlanckFunctions", "QuadGK", "Roots", "ScaledPolynomials", "StaticArrays"]
 path = "."
 uuid = "f583effd-a810-4e6b-b1e2-2b4349a685d7"
 version = "1.0.0"
 
     [deps.Pyrometers.extensions]
+    MultiWavelengthPyrometryExt = "Optimization"
     PyrometersDataInterpolationsExt = "DataInterpolations"
     PyrometersForwardDiffExt = "ForwardDiff"
     PyrometersZygoteExt = "Zygote"
@@ -947,6 +948,7 @@ version = "1.0.0"
     [deps.Pyrometers.weakdeps]
     DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
     ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
+    Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
     Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 
 [[deps.Qt6Base_jll]]
@@ -1081,6 +1083,13 @@ version = "3.0.8"
 [[deps.SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
 version = "0.7.0"
+
+[[deps.ScaledPolynomials]]
+deps = ["LinearAlgebra", "RecipesBase", "StaticArrays"]
+git-tree-sha1 = "3e5c2a77f5b5a5733354e3d5e9125c60c6a885ff"
+repo-url = "https://github.com/Manarom/ScaledPolynomials.jl.git"
+uuid = "d11bbabd-dab6-4367-9c65-d486568a54a8"
+version = "0.1.0"
 
 [[deps.Scratch]]
 deps = ["Dates"]

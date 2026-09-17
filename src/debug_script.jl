@@ -237,7 +237,23 @@ eps_ratio_fun(e , l1 , l2 , T) = e(l1 , T)/e(l2 , T)
             T_meas = p(I_total , ϵ_surf) # measured temperature including stray radiation impact
             # the insident radiation is provided as irradiance 
             geom = Pyrometers.EnclosureGeometry()
-            T_corrected = Pyrometers.stray_radiation_corrected_temperature(p, T_meas, ϵ_surf , Tsource, ϵ_wall , geom) #applying correction 
+            T_corrected = Pyrometers.external_source_corrected_temperature(p, T_meas, ϵ_surf , Tsource, ϵ_wall , geom) #applying correction 
 
             @test T_corrected ≈ Ttrue
     println("ok")
+    e_int = first(integral_emissivity(p , ϵ_surf , Ttrue))
+    i_external =  Pyrometers.fix_temperature(ϵ_wall*i_incident , 1000.0)
+    Pyrometers.stray_radiation_corrected_temperature(p , T_meas , ϵ_surf ,i_external)
+    Pyrometers.measure(p , i_external , ϵ_surf)
+    p(i_external , ϵ_surf)
+
+    @benchmark Pyrometers.stray_radiation_corrected_temperature($p , $T_meas , $ϵ_surf ,$i_external)
+    p2 = TwoBandsRatioPyrometer((2.0 , 3.0) , (4.0 , 5.0))
+    p2(i_external , ϵ_surf)
+    Pyrometers.stray_radiation_corrected_temperature(p2 , T_meas , ϵ_surf ,i_external)
+    Pyrometers.signal(p2 , T_meas , ϵ_surf)
+    Pyrometers.stray_radiation_corrected_temperature(p , T_meas , ϵ_surf ,i_external)
+
+    p_s = Pyrometers.Pyrometer(2.0)
+    T_meas = p_s(I_total , ϵ_surf)
+    Pyrometers.stray_radiation_corrected_temperature(p_s , T_meas , ϵ_surf ,i_external)

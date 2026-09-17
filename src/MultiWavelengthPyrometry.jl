@@ -4,10 +4,11 @@ module MultiwavelengthPyrometry
     MKL, # using MKL turns default LinearAlgebra from library from openBLAS to mkl  
     Optimization,
     OptimizationOptimJL, 
-    Interpolations,
+    #Interpolations,
     StaticArrays,
     RecipesBase,
-    Distributions
+    Distributions,
+    .Pyrometers
     
     #Base.convert(::Type{SciMLBase.ReturnCode.T}, s::Symbol) = SciMLBase.ReturnCode.T(s)
     using ScaledPolynomials
@@ -17,7 +18,7 @@ module MultiwavelengthPyrometry
     #include("Pyrometers.jl") 
     const NPOINT = 30
 
-    export  MultiwavelengthPyrometer,# type for least-square fitting 
+    export  MWPPoint,# type for least-square fitting 
             EmPoint, # type for BB temperature fitting
             fit_T!,# function to fit the BB and real surface temperature
             Pyrometers, # pyrometers module
@@ -48,7 +49,7 @@ module MultiwavelengthPyrometry
                             "IPNewton"=>IPNewton) # list of supported optimizers
     
     const DEFAULT_OPTIMIZER = Ref(LBFGS())
-    const DEFAULT_TEMPERATURE_RANGE = Ref((20.0,3000.0)) # default temperture range used for bounded optimization
+    
     """
     Optimizers supporting box-constraint optimization
     """                        
@@ -93,456 +94,36 @@ Input:
             end
     end
     ## BAND PYROMETRY POINT METHODS
-    """
-    box_constraints(bp::MultiwavelengthPyrometer)
-
-Evaluates box-constraint of the problem
-"""
-    function evaluate_box_constraints(bp::MultiwavelengthPyrometer{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T},
-         emissivity_range::B = nothing,
-         temperature_range::C=nothing)  where {B <: Union{Nothing , NTuple{2 , T} , NTuple{2 , <: Union{NTuple{Pm1 ,T} , StaticVector{Pm1 , T}} } } , C <: Union{Nothing,NTuple{2,T}} } where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
-        # method calculates box constraints 
-        # of the feasible region (dumb version)
-            lb = copy(bp.x)
-            ub = copy(bp.x)
-            e_lb = @view lb[1:end - 1] 
-            e_ub = @view ub[1:end - 1] 
-            # b_all = isnothing(emissivity_range) ? (0.0 , 1.0) : (first(emissivity_range), last(emissivity_range))
-            fill_emissivity_box_constraint!(e_lb , e_ub , bp.vandermonde, emissivity_range)
-            (lb[end], ub[end]) = isnothing(temperature_range) ? extract_temperature_range(bp,emissivity_range) : (first(temperature_range),last(temperature_range))
-        return (lb=lb , ub=ub)
-    end
-    extract_temperature_range(::MultiwavelengthPyrometer,::Nothing) = DEFAULT_TEMPERATURE_RANGE[]
-    function extract_temperature_range(p::MultiwavelengthPyrometer , e_range::NTuple{2 , <: Union{NTuple , StaticVector} } )
-        lb = first(e_range)
-        ub = last(e_range)
-        return extract_temperature_range(p , (minimum(lb) , maximum(ub)))
-    end
-    function extract_temperature_range(p::MultiwavelengthPyrometer , emissivity_range::NTuple{2,T}) where T
-        return ( last(emissivity_range) |> p.e_p, first(emissivity_range) |> p.e_p) # the lower and the upper limits on temperature
-    end
-    
-    """
-    em_cons!(constraint_value::AbstractArray,
-                            x::AbstractVector, 
-                            bp::MultiwavelengthPyrometer)
-
-
-In-place filling of two-elemnt vector of [minimum,maximum] emissivity in the whole 
-wavelength range  
-This function is used in the constraints
-Inputs:
-    constraint_value - (modified)  two-element vector to be modified in-place
-    x - optimization variables vector, x=[a1...an,T], where a1...an - emissivity approximations coefficients, T  - temperature 
-    bp - (modified) 
-"""
-    function em_cons!(constraint_value::AbstractArray,
-                            x::AbstractVector, 
-                            bp::MultiwavelengthPyrometer)
-        # evaluate the constraints on emissivity (it should not be greater than one in a whole spectra range)
-        feval!(bp,x)  
-        constraint_value.=extrema(bp.ϵ) # (minimum,maximum) values of the emissivity 
-        return constraint_value
-        #   in a whole spectrum range
-    end
-    """
-    emissivity!(bp::MultiwavelengthPyrometer,x::AbstractVector)
-
-
-Fills emissivity for the current BandPyrometry point
-Input:
-    bp - (modified) current spectral band pytometry point
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature   
-Fills emissivity for the current BandPyrometry point
-Input:
-    bp - (modified) current spectral band pytometry point
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature   
-"""
-    function emissivity!(bp::MultiwavelengthPyrometer,x::AbstractVector)
-        a = @view x[1:end-1] #emissivity approximation variables
-        return mul!(bp.ϵ, bp.vandermonde.v,a)
-    end
-    """
-    feval!(bp::MultiwavelengthPyrometer,x::AbstractVector)
-
-Fills both the emissivity and the thermal emission spectrum for the current BandPyrometry point
-
-Input:
-    bp - (modified) current spectral band pytometry point
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-"""
-    function feval!(bp::MultiwavelengthPyrometer,x::AbstractVector)
-        # evaluates residual vector
-        #a = @view x[1:end-1] #emissivity approximation variables
-        feval!(bp.e_p , x[end]) # refreshes planck function values
-        if x!=bp.x_em_vec # x_em_vec - emissivity calculation vector
-            emissivity!(bp,x)
-            if bp.is_has_Iₛᵤᵣ # has surrounding radiation correction
-                @. bp.Ic = (bp.e_p.Ib - bp.e_p.Iₛᵤᵣ)*bp.ϵ # I=(Ibb-Isur)*ϵ
-            else
-                @. bp.Ic = bp.e_p.Ib * bp.ϵ # I=Ibb*ϵ
-            end
-            bp.x_em_vec .= x
-        end
-        return bp.Ic
-    end
-    """
-    residual!(bp::MultiwavelengthPyrometer,x::AbstractVector)
-
-Fills emissivity, thermal emission spectrum and evaluates the residuals vector 
-for the current BandPyrometry point
-
-Input:
-    bp - (modified) current spectral band pytometry point
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature    
-"""
-    function residual!(bp::MultiwavelengthPyrometer,x::AbstractVector)
-        feval!(bp,x)   # feval! calculates function value only if current x is not the same as 
-        @. bp.r =bp.e_p.I_measured - bp.Ic # measured data - calculated 
-        bp.e_p.r[] = 0.5*norm(bp.r)^2 # discrepancy value
-        return bp.r # returns residual vector
-    end
-    
-    """
-    disc(x::AbstractVector,bp::MultiwavelengthPyrometer)
-
-Fills emissivity, thermal emission spectrum,evaluates the residuals vector
-and calculates its norm for the current BandPyrometry point
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature 
-    bp - (modified) current spectral band pytometry point
-Fills emissivity, thermal emission spectrum,evaluates the residuals vector
-and calculates its norm for the current BandPyrometry point
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature 
-    bp - (modified) current spectral band pytometry point
-"""
-    function  disc(x::AbstractVector,bp::MultiwavelengthPyrometer)
-        residual!(bp,x)
-        return bp.e_p.r[]# returns current value of discrepancy
-    end
-
-"""
-    jacobian!(x::AbstractVector,bp::MultiwavelengthPyrometer)
-
-Fills the Jacobian matrix for current bandpyrometry point
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified, stores Jacobian internally) current spectral band pytometry point 
-Fills the Jacobian matrix for current bandpyrometry point
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified, stores Jacobian internally) current spectral band pytometry point 
-"""
-function jacobian!(x::AbstractVector,bp::MultiwavelengthPyrometer) # evaluates Planck function
-        ∇!(x[end],bp.e_p) # refresh Planck function first derivative
-        if x!=bp.x_jac_vec
-            J1 = @view bp.jacobian[:,1:end-1] # Jacobian without temperature derivatives
-            J2 = @view bp.jacobian[:,end] # Last column of the jacobian 
-            #a  = @view (x,1,end-1)
-            J1 .= bp.e_p.Ib .* bp.vandermonde.v # diag(ibb)*V
-            J2 .= bp.e_p.∇I .* emissivity!(bp,x)# 
-            bp.x_jac_vec .=x # refresh jacobian calculation vector
-        end
-    end   
-
-    """
-    grad!(g::AbstractVector,x::AbstractVector,bp::MultiwavelengthPyrometer)
-
-In-place filling of the gradient vector of MultiwavelengthPyrometer at point x
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified, recalculates residual vector and Jacobian if the 
-    currently stored value was obtaibed for another optimization variables array)
-    current spectral band pytometry point     
-In-place filling of the gradient vector of MultiwavelengthPyrometer at point x
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified, recalculates residual vector and Jacobian if the 
-    currently stored value was obtaibed for another optimization variables array)
-    current spectral band pytometry point     
-"""
-    function grad!(g::AbstractVector,x::AbstractVector,bp::MultiwavelengthPyrometer)
-        residual!(bp,x)
-        jacobian!(x,bp) # calculated Jₘ
-        g .= - transpose(bp.jacobian) * bp.r # calculates gradient ∇f = -Jₘᵀ*r
-        return nothing
-    end
-
-    """
-    hess_approx!(ha, x::AbstractVector,bp::MultiwavelengthPyrometer)
-
-In-place filling of the approximate hessian (Hₐ = Jᵀ*J (J - Jacobian)) 
-of MultiwavelengthPyrometer at point vector x, approximate Hessian can be used 
-in optimization methods to approximate the full Hessian (e.g. in Gauss-Newton
-or Levenberg-Marquardt methods)
-
-Input:
-    ha - Hessian matrix to be filled in-place
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified) current spectral band pytometry point     
-"""
-function hess_approx!(ha, x::AbstractVector,bp::MultiwavelengthPyrometer)
-        # calculates approximate hessian which is Hₐ = Jᵀ*J (J - Jacobian)
-        if x!=bp.x_hess_approx
-            jacobian!(x,bp)
-            bp.hessian_approx .= transpose(bp.jacobian)*bp.jacobian 
-            # this matrix is always symmetric positive definite
-            bp.x_hess_approx .=x
-        end
-        ha .= bp.hessian_approx
-        return nothing
-    end
-    """
-    hess!(h,x::AbstractVector,bp::MultiwavelengthPyrometer)
-    
-In-place filling of the whole hessian matrix for MultiwavelengthPyrometer at point x
-Input:
-    ha - Hessian matrix to be filled in-place
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified) current spectral band pytometry point      
-In-place filling of the whole hessian matrix for MultiwavelengthPyrometer at point x
-Input:
-    ha - Hessian matrix to be filled in-place
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature
-    bp - (modified) current spectral band pytometry point      
-"""
-function hess!(h , x::AbstractVector , bp::MultiwavelengthPyrometer)
-        if x != bp.x_hess_vec
-            hess_approx!(bp.hessian,x,bp) # refresh the approximate hessian 
-            # and fill hessian with approximate hessian Jᵀ*J
-            # refreshes second derivative of the Planck function
-            ∇²!(x[end],bp.e_p) 
-            # H = Ha - Hm, Ha is approximate Hessian
-            # Hm_vec = Vᵀ*I'ᴰ*r - vector Hm,
-            # V - Vandermonde matrix, I'ᴰ - first 
-            # derivative diagonal matrix,
-            # r - residual vector
-            last_hess_col = @view bp.hessian[1:end-1, end] 
-            # view of the last column of the hessian 
-            # initial formula: Hm_vec = Vᵀ*I'ᴰ*r  => transpose(V)*diagm(I')*r 
-            # A*diagm(b) <=> A.*transpose(b) <=> transpose(Aᵀ.*b) 
-            # Hm_vec = (V.*I')ᵀ*r
-            last_hess_col .-= transpose(bp.vandermonde.v .* bp.e_p.∇I)*bp.r
-            bp.hessian[end,1:end-1] .= last_hess_col # the sample
-            # only right-down corner of hessian contains the second derivative
-            # hm = rᵀ*(∇²Ibb)ᴰ*V*a
-            bp.hessian[end,end] =bp.hessian[end,end] - dot(bp.r.*bp.e_p.∇²I,bp.ϵ) # dot product
-            bp.x_hess_vec .= x
-        end
-        h .= bp.hessian # filling external matrix with internally stored hessian
-        return nothing
-    end
-
-    # EMISSION POINT METHODS
-    function evaluate_box_constraints(::EmPoint{N, Nx3, T},emissivity_range::B=nothing, temperature_constraint::C = nothing) where {N, Nx3, T, B<:Union{NTuple{2,T},Nothing},C<:Union{NTuple{2,T},Nothing} }
-        return isnothing(temperature_constraint) ? DEFAULT_TEMPERATURE_RANGE[] : (temperature_constraint[1], temperature_constraint[2]) # limits on the BB temperature
-    end
-
-    """
-    fill_emissivity_box_constraint!(lb,ub,::VanderMatrix{N, CN, T, NxCN, CNxCN, P},
-                val_bounds::NTuple{2,T}) where {N, CN, T, NxCN, CNxCN, P<:BernsteinSymPoly}
-
-Evaluates box-boundaries for polynomial coefficients for `BernsteinSymPoly` 
-polynomial basis
-"""
-    function fill_emissivity_box_constraint!(lb , ub , ::VanderMatrix{N, CN, T},
-                    val_bounds::NTuple{2,T}) where {N, CN, T}
-
-        fill!(lb , first(val_bounds))
-        fill!(ub , last(val_bounds))
-
-    end
-    fill_emissivity_box_constraint!(lb , ub , V::VanderMatrix{N,CN,T},::Nothing) where {N,CN,T} = fill_emissivity_box_constraint!(lb , ub , V, (zero(T) , one(T)))
-
-    function fill_emissivity_box_constraint!(lb , ub , ::VanderMatrix{N , CN , T},
-                    val_bounds::NTuple{2 , <:Union{NTuple{CN , T}, StaticVector{CN , T}}}) where {N, CN, T}
-                    
-        copyto!(lb , first(val_bounds) ) 
-        copyto!(ub , last(val_bounds) )
-    end
-
-    feval!(e::EmPoint,T::AbstractArray) = feval!(e,T[end])
-    """
-    feval!(e::EmPoint,t::Float64)
-
-Evaluates bb intensity for temperature t
-"""
-function feval!(e::EmPoint,t::Float64) # fills planck spectrum
-        if t!=e.Tib[] # if current temperature is the same as the last recorded, 
-            #a₁₂₃!(e_obj.amat,e_obj.λ,t) # filling amat
-            Planck.a₁₂₃!(e.amat,e.λ,t) #fills amatrix
-            Planck.ibb!(e.Ib, e.λ, e.amat) #fills BB spectrum
-            e.Tib[] = t # save the current temperature
-        end
-        return e.Ib
-    end
-    residual!(e::EmPoint , T::AbstractArray) = residual!(e::EmPoint,T[end])
-"""
-    residual!(e::EmPoint,t::Float64)
-
-Evaluates the residual vector between calculated and measured bb thermal 
-emission intensity spectrum
-Evaluates the residual vector between calculated and measured bb thermal 
-emission intensity spectrum
-"""
-function residual!(e::EmPoint,t::Float64)
-        feval!(e,t)
-        if t!=e.Tri[] # if current temperature is the same as the last recorded, 
-            e.ri .= e.I_measured .- e.Ib# calculating discrepancy
-            e.r[] =0.5* norm(e.ri)^2 # discrepancy value
-            e.Tri[]=t# filling temperature of residual
-        end
-        return e.ri # returns residual vector
-    end
-    
-    """
-    disc(T,e::EmPoint)
-
-Evaluates the least-square discrepancy between measured and calculates spectra
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature 
-    e - (modified) current bb thermal emission point 
-Evaluates the least-square discrepancy between measured and calculates spectra
-Input:
-    x - optimization variables vector, x=[a1...an,T],
-    where a1...an - emissivity approximations coefficients, T  - temperature 
-    e - (modified) current bb thermal emission point 
-"""
-function  disc(T,e::EmPoint)
-        residual!(e,T)# fills residuals
-        return e.r[] # returns current value of discrepancy
-    end
-
-    ∇!(T::AbstractVector,e::EmPoint) = ∇!(T[end],e)
-
-    """
-    ∇!(t::Float64,e::EmPoint)
-
-Fills the first derivative of Planck function 
-Input:
-    T  - temperature 
-    e - (modified) current bb thermal emission point   
-Fills the first derivative of Planck function 
-Input:
-    T  - temperature 
-    e - (modified) current bb thermal emission point   
-"""
-function ∇!(t::Float64,e::EmPoint) # evaluates Planck function first derivative
-        feval!(e,t)# refreshes amat and Ib
-        if t!=e.T∇ib[] # current temperature is not equal to the temperature of gradient calculation
-            Planck.∇ₜibb!(e.∇I,t, e.amat,e.Ib)# fills Planck first derivative
-            e.T∇ib[] = t # refresh gradient calculation temperature
-        end
-        return e.∇I
-    end
-    grad!(g::AbstractVector,T::AbstractVector ,e::EmPoint)=grad!(g,T[end] ,e)
-    """
-    grad!(g::AbstractVector,t::Float64 ,e::EmPoint)
-
-In-place filling of the gradient of least-square problem of bb thermal emission spectrum fitting 
-Input:
-    g - gradient vector to be filled
-    t  - temperature 
-    e - (modified) current bb thermal emission ppoint 
-"""
-function grad!(g::AbstractVector,t::Float64 ,e::EmPoint)
-        ∇!(t,e)
-        residual!(e,t)
-        if t!=e.Tgrad[]
-            g[end]= - dot(e.ri,e.∇I) # filling gradient vector
-            e.Tgrad[] = t
-        end
-        return nothing
-    end
-
-    ∇²!(T::AbstractVector,e::EmPoint)=∇²!(T[end],e)
-
-    """
-    ∇²!(t::Float64,e::EmPoint)
-
-Fills the second derivative of Planck function 
-    Input:
-        T  - temperature 
-        e - (modified) current bb thermal emission point  
-"""
-function ∇²!(t::Float64,e::EmPoint)
-        ∇!(t,e)# refreshes amat and Planck gradient
-        if t != e.T∇²ib[]
-           Planck.∇²ₜibb!(e.∇²I, t, e.amat, e.∇I) 
-           e.T∇²ib[] = t # ref value
-        end
-        return e.∇²I
-    end
-    hess!(h,T::AbstractVector,e::EmPoint) = hess!(h,T[end],e)
-    """
-    hess!(h,t::Float64,e::EmPoint)
-
-In-place filling of least-square problem hessian matrix 
-    Input:
-        h - hessian 
-        T - temperature 
-        e - (modified) current bb thermal emission point  
-        
-In-place filling of least-square problem hessian matrix 
-    Input:
-        h - hessian 
-        T - temperature 
-        e - (modified) current bb thermal emission point  
-"""
-function hess!(h,t::Float64,e::EmPoint) # calculates hessian of a simple Planck function fitting
-        ∇²!(t,e)
-        if t != e.Thess[]
-            e.Thess[] = t
-            h[]= dot(e.∇I,e.∇I) - dot(e.ri,e.∇²I)
-        end
-        
-        return nothing
-    end
 
 
     const LAGRANGE_OPTIM_FUN = OptimizationFunction(disc,grad=grad!,hess=hess!,cons=em_cons!)
     const OPTIM_FUN  = OptimizationFunction(disc,grad=grad!,hess=hess!) 
     """
-    fit_T!(point::Union{EmPoint,MultiwavelengthPyrometer};
+    fit_T!(point::Union{EmPoint,MWPPoint};
             optimizer_name::String="Default",
             is_box_constraint::Bool=false,
             is_lagrange_constraint::Bool=false, 
             emissivity_range::C=nothing, 
             temperature_range::B=nothing) where {B <: Union{AbstractVector,Nothing,NTuple{2}},C <: Union{AbstractVector,Nothing,NTuple{2}}}
 
-Input:
-    point - (modified) real suraface (MultiwavelengthPyrometer) of blackbody thermal emission object
-    (optional)
-    optimizer_name - the name of optimizer must be the key of optim_dic
-    is_constraint - is box-constraint flag
-    is_lagrange_constraint - is Lagrange-constraint flag
-Returns:
-    if the point type is EmPoint, the output is:
-        named tuple with (T - fitted temperature,
-                            res - optimization output object,
-                            optimizer - chosen optimizer)
-    if the point is of the MultiwavelengthPyrometer type, the output is:
-        named tuple with (T - fitted temperature ,a - fitted emissivity approximation coefficients,
-                            ϵ - emissivity spectrum in the whole wavelemgth range,
-                            res - optimization output object,
-                            optimizer - chosen optimizer)                
+    Input:
+        point - (modified) real suraface (MWPPoint) of blackbody thermal emission object
+        (optional)
+        optimizer_name - the name of optimizer must be the key of optim_dic
+        is_constraint - is box-constraint flag
+        is_lagrange_constraint - is Lagrange-constraint flag
+    Returns:
+        if the point type is EmPoint, the output is:
+            named tuple with (T - fitted temperature,
+                                res - optimization output object,
+                                optimizer - chosen optimizer)
+        if the point is of the MWPPoint type, the output is:
+            named tuple with (T - fitted temperature ,a - fitted emissivity approximation coefficients,
+                                ϵ - emissivity spectrum in the whole wavelemgth range,
+                                res - optimization output object,
+                                optimizer - chosen optimizer)                
 """
-function fit_T!(point::Union{EmPoint , MultiwavelengthPyrometer};
+function fit_T!(point::Union{EmPoint , MWPPoint};
             optimizer_name::String="Default",
             is_box_constraint::Bool=false,
             is_lagrange_constraint::Bool=false, 
@@ -584,29 +165,19 @@ function fit_T!(point::Union{EmPoint , MultiwavelengthPyrometer};
                                 point; kwargs...)           
         end
         results = solve(probl,optimizer())
-        isa(point, MultiwavelengthPyrometer) ? copyto!(point.x , results.u) : feval!(point,results.u)
+        isa(point, MWPPoint) ? copyto!(point.x , results.u) : feval!(point,results.u)
         return  fitting_result(point, results, optimizer) 
                         
     end
     
-    fitting_result(point::MultiwavelengthPyrometer,results,optimizer) = (T=temperature(point),a=results.u[1:end-1],
-                                                                            ϵ=point.vandermonde*results.u[1:end-1],
-                                                                            res=results,
-                                                                            optimizer=optimizer)
-
-    fitting_result(point::EmPoint, results, optimizer) = (T=temperature(point), res=results, optimizer=optimizer)
-    function trim_starting_vector_to_box!(v,lb,ub)
-        for (i,(l,u)) in enumerate(zip(lb,ub))
-             l <= v[i] && v[i] <= u ? continue :  v[i] = (l + u)/2
-        end
-    end
+   
     function fitT_default(point::EmPoint)
         probl= OptimizationProblem(OPTIM_FUN, MVector{1}([235.0]),point)
         results = solve(probl,DEFAULT_OPTIMIZER[])   
         feval!(point,results.u)
         return (T=temperature(point), res=results, optimizer=DEFAULT_OPTIMIZER[])                 
     end
-    function fitT_default(point::MultiwavelengthPyrometer)
+    function fitT_default(point::MWPPoint)
         probl= OptimizationProblem(OPTIM_FUN, point.x,point)
         results = solve(probl,DEFAULT_OPTIMIZER[])   
         feval!(point,results.u)
@@ -623,22 +194,22 @@ function fit_T!(point::Union{EmPoint , MultiwavelengthPyrometer};
         emp.I_measured .*= eps
         return T
     end
-    function (emp::MultiwavelengthPyrometer)(I::AbstractVector)
+    function (emp::MWPPoint)(I::AbstractVector)
         copyto!(emp.e_p.I_measured,I)
         return fitT_default(emp).T
     end
-    function (emp::Union{EmPoint,MultiwavelengthPyrometer})()
+    function (emp::Union{EmPoint,MWPPoint})()
         return fit_T!(emp).T
     end
     """
-    covariance(bp::MultiwavelengthPyrometer)
+    covariance(bp::MWPPoint)
 
 Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
 """
-function fitting_covariance(bp::MultiwavelengthPyrometer{N,Nx3,P}) where {N,Nx3,P}
+function fitting_covariance(bp::MWPPoint{N,Nx3,P}) where {N,Nx3,P}
     sigma_square = sumabs2(bp.e_p.ri)/degrees_of_freedom(bp)
     h = similar(bp.hessian)
-    hess!(h, bp.x, bp::MultiwavelengthPyrometer)
+    hess!(h, bp.x, bp::MWPPoint)
     return 2*sigma_square*inv(h)
 end
 """
@@ -654,12 +225,12 @@ function fitting_covariance(em::EmPoint{N,Nx3,T}) where {N,Nx3,T}
 end
 fitting_variance(em::EmPoint) = vec(fitting_covariance(em))
 """
-    fitting_variance(bp::MultiwavelengthPyrometer)
+    fitting_variance(bp::MWPPoint)
 
 Returns the optimization variable variance (diagonal of the covariance matrix)
 """
-fitting_variance(bp::MultiwavelengthPyrometer) = collect(diag(fitting_covariance(bp)))
-fitting_error(p::Union{MultiwavelengthPyrometer,EmPoint};probability = 0.95,only_std::Bool=false) =(only_std ? 1.0 : student_coefficient(degrees_of_freedom(p),probability))*sqrt.(fitting_variance(p))
+fitting_variance(bp::MWPPoint) = collect(diag(fitting_covariance(bp)))
+fitting_error(p::Union{MWPPoint,EmPoint};probability = 0.95,only_std::Bool=false) =(only_std ? 1.0 : student_coefficient(degrees_of_freedom(p),probability))*sqrt.(fitting_variance(p))
 """
     student_coefficient(degrees_of_freedom::Int, probability; digits::Int = 3, side::Int = 2)
 
@@ -697,7 +268,7 @@ end
             (m.λ,m.Ib)
         end
     end
-    @recipe function f(m::MultiwavelengthPyrometer)
+    @recipe function f(m::MWPPoint)
         minorgrid--> true
         gridlinewidth-->2
         dpi-->600
