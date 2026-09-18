@@ -6,7 +6,8 @@ Pkg.activate(joinpath(@__DIR__,".."))
 using Pyrometers
 
 #using Optimization , OptimizationOptimJL
-using Optim
+#using Optim
+using JSOSolvers
 using BenchmarkTools
 using QuadGK
 using Test

@@ -24,6 +24,7 @@ Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
 OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 NLSolversBase = "d41bc354-129a-5804-8e4c-c37616107c6c"
+JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
 
 [extensions]
 PyrometersDataInterpolationsExt = "DataInterpolations"
@@ -31,6 +32,7 @@ PyrometersForwardDiffExt = "ForwardDiff"
 PyrometersZygoteExt = "Zygote"
 MultiWavelengthPyrometryOptimizationExt = "Optimization"
 MultiWavelengthPyrometryOptimExt = "Optim"
+MultiWavelengthPyrometryJSOSolversExt = "JSOSolvers"
 
 [compat]
 ADTypes = "1.23.0"
@@ -49,6 +51,7 @@ Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
 OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
 Optim = "429524aa-4258-5aef-a3af-852621145aeb"
 NLSolversBase = "d41bc354-129a-5804-8e4c-c37616107c6c"
+JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
 
 [targets]
 test = ["Test", "ForwardDiff", "Zygote", "QuadGK", "ADTypes", "DataInterpolations"]
