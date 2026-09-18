@@ -1,6 +1,6 @@
 
 # MultiwavlengthPyrometryTypes should be included in the MultiwavlengthPyrometry module
-const DEFAULT_TEMPERATURE_RANGE = Ref((20.0,3000.0)) # default temperture range used for bounded optimization
+const DEFAULT_TEMPERATURE_RANGE = Ref((SVector(20.0) , SVector(3000.0))) # default temperture range used for bounded optimization
 #function 
 """
 BBPoint type stores data on thermal emission spectrum and its 
@@ -326,7 +326,8 @@ Input:
     end
 
 """
-    jacobian!(x::AbstractVector,bp::MWPPoint)
+    jacobian!(bp::MWPPoint , x::AbstractVector)
+
 
 Fills the Jacobian matrix for current bandpyrometry point
 Input:
@@ -339,7 +340,7 @@ Input:
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified, stores Jacobian internally) current spectral band pytometry point 
 """
-function jacobian!(x::AbstractVector,bp::MWPPoint) # evaluates Planck function
+function jacobian!(bp::MWPPoint , x::AbstractVector) # evaluates Planck function
         ∇!(bp.bb , x[end]) # refresh Planck function first derivative
         if x!=bp.x_jac_vec
             J1 = @view bp.jacobian[:,1:end-1] # Jacobian without temperature derivatives
@@ -352,7 +353,7 @@ function jacobian!(x::AbstractVector,bp::MWPPoint) # evaluates Planck function
     end   
 
     """
-    grad!(g::AbstractVector,x::AbstractVector,bp::MWPPoint)
+    grad!(g::AbstractVector , x::AbstractVector , bp::MWPPoint)
 
 In-place filling of the gradient vector of MWPPoint at point x
 Input:
@@ -371,9 +372,9 @@ Input:
 """
     function grad!(g::AbstractVector , x::AbstractVector  , bp::MWPPoint)
         residual!(bp , x)
-        jacobian!(x , bp) # calculated Jₘ
+        jacobian!( bp , x) # calculated Jₘ
         g .= - transpose(bp.jacobian) * bp.r # calculates gradient ∇f = -Jₘᵀ*r
-        return nothing
+        return g
     end
 
     """
@@ -390,10 +391,10 @@ Input:
     where a1...an - emissivity approximations coefficients, T  - temperature
     bp - (modified) current spectral band pytometry point     
 """
-function hess_approx!(ha, x::AbstractVector,bp::MWPPoint)
+function hess_approx!(ha , x::AbstractVector  , bp::MWPPoint)
         # calculates approximate hessian which is Hₐ = Jᵀ*J (J - Jacobian)
         if x!=bp.x_hess_approx
-            jacobian!(x,bp)
+            jacobian!(bp , x)
             bp.hessian_approx .= transpose(bp.jacobian)*bp.jacobian 
             # this matrix is always symmetric positive definite
             bp.x_hess_approx .=x
@@ -402,7 +403,7 @@ function hess_approx!(ha, x::AbstractVector,bp::MWPPoint)
         return nothing
     end
     """
-    hess!(h,x::AbstractVector,bp::MWPPoint)
+    hess!(h , x::AbstractVector,bp::MWPPoint)
     
 In-place filling of the whole hessian matrix for MWPPoint at point x
 Input:
@@ -419,10 +420,10 @@ Input:
 """
 function hess!(h , x::AbstractVector , bp::MWPPoint)
         if x != bp.x_hess_vec
-            hess_approx!(bp.hessian,x,bp) # refresh the approximate hessian 
+            hess_approx!(bp.hessian , x , bp) # refresh the approximate hessian 
             # and fill hessian with approximate hessian Jᵀ*J
             # refreshes second derivative of the Planck function
-            ∇²!(x[end],bp.bb) 
+            ∇²!(bp.bb , x[end]) 
             # H = Ha - Hm, Ha is approximate Hessian
             # Hm_vec = Vᵀ*I'ᴰ*r - vector Hm,
             # V - Vandermonde matrix, I'ᴰ - first 
@@ -440,8 +441,8 @@ function hess!(h , x::AbstractVector , bp::MWPPoint)
             bp.hessian[end,end] =bp.hessian[end,end] - dot(bp.r.*bp.bb.∇²I,bp.ϵ) # dot product
             bp.x_hess_vec .= x
         end
-        h .= bp.hessian # filling external matrix with internally stored hessian
-        return nothing
+        copyto!(h , bp.hessian) # filling external matrix with internally stored hessian
+        return h
     end
 
     function evaluate_box_constraints(::BBPoint{N, Nx3, T} , emissivity_range::B=nothing, temperature_constraint::C = nothing) where {N, Nx3, T, B<:Union{NTuple{2,T},Nothing},C<:Union{NTuple{2,T},Nothing} }
@@ -524,10 +525,10 @@ function  disc(T , e::BBPoint)
         return e.r[] # returns current value of discrepancy
     end
 
-    ∇!(e::BBPoint , T::AbstractVector) = ∇!(T[end],e)
+    ∇!(e::BBPoint , T::AbstractVector) = ∇!(e , T[end])
 
     """
-    ∇!(t::Float64,e::BBPoint)
+    ∇!(e::BBPoint , t::Number)
 
 Fills the first derivative of Planck function 
 Input:
@@ -563,28 +564,29 @@ function grad!(g::AbstractVector, t::Number , e::BBPoint)
             g[end]= - dot(e.ri,e.∇I) # filling gradient vector
             e.Tgrad[] = t
         end
-        return nothing
+        return g
     end
 
-    ∇²!(T::AbstractVector,e::BBPoint)=∇²!(T[end],e)
+    ∇²!(e::BBPoint , T::AbstractVector)=∇²!(e , T[end])
 
     """
-    ∇²!(t::Float64,e::BBPoint)
+    ∇²!(e::BBPoint , t::Number)
 
 Fills the second derivative of Planck function 
+
     Input:
         T  - temperature 
         e - (modified) current bb thermal emission point  
 """
-function ∇²!(t::Number , e::BBPoint)
-        ∇!(t,e)# refreshes amat and Planck gradient
+function ∇²!(e::BBPoint , t::Number)
+        ∇!(e , t)# refreshes amat and Planck gradient
         if t != e.T∇²ib[]
            Planck.∇²ₜibb!(e.∇²I, t, e.amat, e.∇I) 
            e.T∇²ib[] = t # ref value
         end
         return e.∇²I
     end
-    hess!(h,T::AbstractVector,e::BBPoint) = hess!(h,T[end],e)
+    hess!(h , T::AbstractVector,e::BBPoint) = hess!(h,T[end],e)
     """
     hess!(h,t::Float64,e::BBPoint)
 
@@ -601,46 +603,65 @@ In-place filling of least-square problem hessian matrix
         e - (modified) current bb thermal emission point  
 """
 function hess!(h , t::Number , e::BBPoint{M , N , T}) where { M , N ,T <: Number} # calculates hessian of a simple Planck function fitting
-        ∇²!(t,e)
+        ∇²!(e , t)
         if t != e.Thess[]
             e.Thess[] = T(t)
             h[]= dot(e.∇I , e.∇I) - dot(e.ri , e.∇²I)
         end
         
-        return nothing
+        return h
     end
-    fitting_result(point::MWPPoint , results, optimizer) = (T=temperature(point),a=results.u[1:end-1],
-                                                                            ϵ=point.vandermonde*results.u[1:end-1],
-                                                                            res=results,
-                                                                            optimizer=optimizer)
-
-    fitting_result(point::BBPoint , results , optimizer) = (T=temperature(point), res=results, optimizer=optimizer)
+    function fitting_result(point::MWPPoint , results, probl , optimizer , ::Val{:full}) 
+        return (T=temperature(point) , a=results.u[1:end-1],
+                                    ϵ=point.vandermonde*results.u[1:end-1],
+                                    res=results,
+                                    problem = probl, 
+                                    optimizer=optimizer)
+    end
+    fitting_result(point::Union{MWPPoint , BBPoint} , _, _ , _ , ::Val{:T}) = temperature(point)
+    fitting_result(point::BBPoint , results , probl , optimizer ,::Val{:full}) = (T=temperature(point), 
+                                                                    res=results, problem = probl ,  optimizer=optimizer)
     function trim_starting_vector_to_box!(v,lb,ub)
         for (i,(l,u)) in enumerate(zip(lb,ub))
              l <= v[i] && v[i] <= u ? continue :  v[i] = (l + u)/2
         end
     end
 
-
-function fit_T!(point::Union{BBPoint , MWPPoint},
-            optimizer;
+function fit_T!(p::Union{BBPoint , MWPPoint},
+            o = nothing;
             emissivity_range::C=nothing, 
             temperature_range::B=nothing , 
-            kwargs...) where {B <: Union{AbstractVector,Nothing,NTuple{2}} , 
-                                C <: Union{AbstractVector,Nothing,NTuple{2}}}
-            
-        if point isa BBPoint
-            starting_vector = SVector{1}(235.0)
-        else
-            starting_vector = SVector(point.x);
-        end
+            result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector,Nothing,NTuple{2}} , 
+                              C <: Union{AbstractVector,Nothing,NTuple{2}} , D }  
+
+        sv = get_default_starting_vector(p)
+        return fit_T!(p , sv , o ;
+                        emissivity_range = emissivity_range , 
+                        temperature_range = temperature_range , 
+                        result_type = result_type )
+end
+get_default_starting_vector(::BBPoint{M , N, T}) where {M , N, T} = MVector{1}(T(1000.0))
+get_default_starting_vector(p::MWPPoint) = MVector(p.x)
+function fit_T!(point::Union{BBPoint , MWPPoint}, 
+            starting_vector::AbstractVector,
+            optimizer = nothing;
+            emissivity_range::C=nothing, 
+            temperature_range::B=nothing , 
+            result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector,Nothing,NTuple{2}} , 
+                              C <: Union{AbstractVector,Nothing,NTuple{2}} , D }
+
         (lb , ub) = evaluate_box_constraints(point, emissivity_range, temperature_range)
         trim_starting_vector_to_box!(starting_vector , lb , ub)
-        (results , problem) = _solve_problem(point , starting_vector , lb , ub , optimizer)
-        isa(point, MWPPoint) ? copyto!(point.x , results.u) : feval!(point,results.u)
-        return  fitting_result(point, results, optimizer , problem) 
+        (results , optimizer , problem) = _solve_problem(point , starting_vector , lb , ub , optimizer)
+        return  fitting_result(point, results, optimizer , problem , result_type) 
                         
 end
+function (emp::Union{BBPoint,MWPPoint})(I::Union{AbstractVector , Number}) 
+    copyto!(emp.I_measured , I)
+    return fit_T!(emp)
+end
+(emp::Union{BBPoint,MWPPoint})() =fit_T!(emp)
+
 function _solve_problem(point , starting_vector , lb , ub , optimizer) error("To use multiwavelength pyrometry one must add Optimization package to the working env") end
 
 

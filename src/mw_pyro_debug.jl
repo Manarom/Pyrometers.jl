@@ -5,7 +5,8 @@ Pkg.activate(joinpath(@__DIR__,".."))
 
 using Pyrometers
 
-using Optimization , OptimizationOptimJL
+#using Optimization , OptimizationOptimJL
+using Optim
 using BenchmarkTools
 using QuadGK
 using Test
@@ -19,6 +20,26 @@ l = range(1,2,50)
 Ttrue = 1076.894567 
 i = bb.(l , Ttrue)
 
-bbp = Pyrometers.BBPoint(i , l)
+bbp = Pyrometers.BBPoint(SVector{50}(i) , SVector{50}(l))
+bbp(bb.(l , 1685) )
 
-Pyrometers.fit_T!(bbp , NelderMead)
+@benchmark Pyrometers._solve_problem($bbp , $[1237.8] , $[20.0] , $[3000.0] , LBFGS)
+
+@benchmark $bbp(LBFGS)
+@benchmark Pyrometers.fit_T!($bbp )
+bbp()
+@benchmark Pyrometers.fit_T!($bbp , $LBFGS )
+@code_warntype Pyrometers.fit_T!(bbp )
+
+optim_fun = OptimizationFunction(Pyrometers.disc , grad = Pyrometers.grad! , hess = Pyrometers.hess!)
+optim_fun([1274.0] , bbp)
+prob = OptimizationProblem(optim_fun , [1000.0] , bbp)
+solve(prob , LBFGS())
+starting_vector = [1000.0]
+probl = OptimizationProblem(
+                    optim_fun, 
+                    starting_vector,
+                    bbp, 
+                )
+solve(probl , LBFGS())
+@benchmark solve($probl , $(Brent()))

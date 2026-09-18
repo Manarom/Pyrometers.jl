@@ -21,12 +21,16 @@ ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
 Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
+OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+NLSolversBase = "d41bc354-129a-5804-8e4c-c37616107c6c"
 
 [extensions]
 PyrometersDataInterpolationsExt = "DataInterpolations"
 PyrometersForwardDiffExt = "ForwardDiff"
 PyrometersZygoteExt = "Zygote"
-MultiWavelengthPyrometryExt = "Optimization"
+MultiWavelengthPyrometryOptimizationExt = "Optimization"
+MultiWavelengthPyrometryOptimExt = "Optim"
 
 [compat]
 ADTypes = "1.23.0"
@@ -42,6 +46,9 @@ Zygote = "e88e6eb3-aa80-5325-afca-941959d7151f"
 QuadGK = "1fd47b50-473d-5c70-9696-f719f8f3bcdc"
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
 Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"
+OptimizationOptimJL = "36348300-93cb-4f02-beb5-3c3902f8871e"
+Optim = "429524aa-4258-5aef-a3af-852621145aeb"
+NLSolversBase = "d41bc354-129a-5804-8e4c-c37616107c6c"
 
 [targets]
 test = ["Test", "ForwardDiff", "Zygote", "QuadGK", "ADTypes", "DataInterpolations"]
