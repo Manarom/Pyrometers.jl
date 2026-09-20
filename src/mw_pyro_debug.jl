@@ -1,13 +1,14 @@
 using Revise
+
 using Pkg
 
 Pkg.activate(joinpath(@__DIR__,"..")) 
 
 using Pyrometers
-
+using StaticArrays
 #using Optimization , OptimizationOptimJL
-#using Optim
-using JSOSolvers
+using Optim
+#using JSOSolvers
 using BenchmarkTools
 using QuadGK
 using Test
@@ -26,9 +27,9 @@ bbp(bb.(l , 1685) )
 
 @benchmark Pyrometers._solve_problem($bbp , $[1237.8] , $[20.0] , $[3000.0] , LBFGS)
 
-@benchmark $bbp(LBFGS)
+@benchmark $bbp(;optimizer=LBFGS)
 @benchmark Pyrometers.fit_T!($bbp )
-bbp()
+@benchmark $bbp()
 @benchmark Pyrometers.fit_T!($bbp , $LBFGS )
 @code_warntype Pyrometers.fit_T!(bbp )
 
@@ -44,3 +45,13 @@ probl = OptimizationProblem(
                 )
 solve(probl , LBFGS())
 @benchmark solve($probl , $(Brent()))
+
+N = length(l)
+noise = 1e-3
+mwp = Pyrometers.MWPPoint(SVector{N}(i .+ 0.0 * randn(N)) , SVector{N}(l) , SVector((0.2 , 0.3 , 0.4 , 1273.15)))
+mwp(emissivity_range = (0.9 , 1.0))
+Ttrue
+@benchmark $mwp()
+Pyrometers.fit_T!(mwp , MVector((0.2 , 0.3 , 0.4 , 1273.15)) , nothing ;  emissivity_range = (0.5 , 1.0))      
+
+Pyrometers.evaluate_box_constraints(mwp , (0.2 , 0.3)  , (1200.0 , 1300.0) )

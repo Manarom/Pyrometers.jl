@@ -2,7 +2,7 @@
 
 julia_version = "1.12.7"
 manifest_format = "2.0"
-project_hash = "8dc4586d5b1bf46ba8912baadd9d9831cbaca8af"
+project_hash = "dd122d81e3d036e3d652203686d0f600e8922a7e"
 
 [[deps.ADTypes]]
 deps = ["PrecompileTools"]
@@ -941,6 +941,7 @@ version = "1.0.0"
 
     [deps.Pyrometers.extensions]
     MultiWavelengthPyrometryJSOSolversExt = "JSOSolvers"
+    MultiWavelengthPyrometryLBFGSBExt = "LBFGSB"
     MultiWavelengthPyrometryOptimExt = "Optim"
     MultiWavelengthPyrometryOptimizationExt = "Optimization"
     PyrometersDataInterpolationsExt = "DataInterpolations"
@@ -951,6 +952,7 @@ version = "1.0.0"
     DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
     ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
     JSOSolvers = "10dff2fc-5484-5881-a0e0-c90441020f8a"
+    LBFGSB = "5be7bae1-8223-5378-bac3-9e7378a2f6e6"
     NLSolversBase = "d41bc354-129a-5804-8e4c-c37616107c6c"
     Optim = "429524aa-4258-5aef-a3af-852621145aeb"
     Optimization = "7f7a1694-90dd-40f0-9382-eb1efda571ba"

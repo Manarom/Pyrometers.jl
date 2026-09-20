@@ -1,6 +1,7 @@
 
 # MultiwavlengthPyrometryTypes should be included in the MultiwavlengthPyrometry module
-const DEFAULT_TEMPERATURE_RANGE = Ref((SVector(20.0) , SVector(3000.0))) # default temperture range used for bounded optimization
+const DEFAULT_TEMPERATURE_RANGE = Ref((20.0 , 3000.0)) # default temperture range used for bounded optimization
+const DEFAULT_EMISSIVITY_RANGE = Ref((0.1 , 1.0))
 #function 
 """
 BBPoint type stores data on thermal emission spectrum and its 
@@ -126,7 +127,7 @@ Constructor for band pyrometry fitting,
 function MWPPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
                         λ::StaticArray{Tuple{N},T,1},
                         initial_x::StaticArray{Tuple{P},T,1};
-                        polynomial_type::Symbol=:stand,
+                        polynomial_type::Symbol=:bernsteinsym,
                         I_sur::Union{StaticArray{Tuple{N},T,1},Nothing}=nothing) where {N,P,T}
 
        PolyTypeAbs = haskey(ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES , polynomial_type) ? ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[polynomial_type] : BernsteinSymPoly
@@ -191,10 +192,10 @@ emissivity(p::MWPPoint) = copy(p.ϵ)
 Evaluates box-constraint of the problem
 """
 function evaluate_box_constraints(bp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T},
-        emissivity_range::B = nothing,
-        temperature_range::C=nothing)  where {B <: Union{Nothing , NTuple{2 , T} , 
-                                                NTuple{2 , <: Union{NTuple{Pm1 ,T} , StaticVector{Pm1 , T}} } } ,
-                                                    C <: Union{Nothing,NTuple{2,T}} } where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
+        emissivity_range::B  = nothing,
+        temperature_range::C = nothing )  where {B <: Union{Nothing , NTuple{2 , T} ,  NTuple{2 , <: Union{NTuple{Pm1 ,T} , StaticVector{Pm1 , T}} } } ,
+                                                C <: Union{Nothing , NTuple{2,T}} } where {N, Nx3, P, NxP, 
+                                                            PxP, Pm1, NxPm1, Pm1xPm1, T}
     # method calculates box constraints 
     # of the feasible region (dumb version)
         lb = copy(bp.x)
@@ -203,17 +204,24 @@ function evaluate_box_constraints(bp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, 
         e_ub = @view ub[1:end - 1] 
         # b_all = isnothing(emissivity_range) ? (0.0 , 1.0) : (first(emissivity_range), last(emissivity_range))
         fill_emissivity_box_constraint!(e_lb , e_ub , bp.vandermonde, emissivity_range)
-        (lb[end], ub[end]) = isnothing(temperature_range) ? extract_temperature_range(bp,emissivity_range) : (first(temperature_range),last(temperature_range))
+        # @show e_lb , e_ub 
+        (lb[end], ub[end]) = if  isnothing(temperature_range) 
+            extract_temperature_range(bp , emissivity_range) 
+        else 
+            (first(temperature_range) , last(temperature_range))
+        end
     return (lb=lb , ub=ub)
 end
-extract_temperature_range(::MWPPoint,::Nothing) = DEFAULT_TEMPERATURE_RANGE[]
+extract_temperature_range(::MWPPoint , ::Nothing) = DEFAULT_TEMPERATURE_RANGE[]
 function extract_temperature_range(p::MWPPoint , e_range::NTuple{2 , <: Union{NTuple , StaticVector} } )
     lb = first(e_range)
     ub = last(e_range)
     return extract_temperature_range(p , (minimum(lb) , maximum(ub)))
 end
 function extract_temperature_range(p::MWPPoint , emissivity_range::NTuple{2,T}) where T
-    return ( last(emissivity_range) |> p.bb, first(emissivity_range) |> p.bb) # the lower and the upper limits on temperature
+    (e1 , e2) = emissivity_range
+    (e1 > e2) && ((e1 , e2) = (e2 , e1)) 
+    return ( try_emissivity(p.bb , e2) , try_emissivity(p.bb , e1) ) # the lower and the upper limits on temperature
 end
 
   """
@@ -235,7 +243,7 @@ function em_cons!(constraint_value::AbstractArray,
                         bp::MWPPoint)
     # evaluate the constraints on emissivity (it should not be greater than one in a whole spectra range)
     feval!(bp,x)  
-    constraint_value.=extrema(bp.ϵ) # (minimum,maximum) values of the emissivity 
+    constraint_value .= extrema(bp.ϵ) # (minimum,maximum) values of the emissivity 
     return constraint_value
     #   in a whole spectrum range
 end
@@ -271,14 +279,14 @@ Input:
     x - optimization variables vector, x=[a1...an,T],
     where a1...an - emissivity approximations coefficients, T  - temperature
 """
-    function feval!(bp::MWPPoint,x::AbstractVector)
+    function feval!(bp::MWPPoint , x::AbstractVector)
         # evaluates residual vector
         #a = @view x[1:end-1] #emissivity approximation variables
         feval!(bp.bb , x[end]) # refreshes planck function values
         if x!=bp.x_em_vec # x_em_vec - emissivity calculation vector
             emissivity!(bp,x)
             if bp.is_has_Iₛᵤᵣ # has surrounding radiation correction
-                @. bp.Ic = (bp.bb.Ib - bp.bb.Iₛᵤᵣ)*bp.ϵ # I=(Ibb-Isur)*ϵ
+                @. bp.Ic = (bp.bb.Ib - bp.bb.Iₛᵤᵣ) * bp.ϵ # I=(Ibb-Isur)*ϵ
             else
                 @. bp.Ic = bp.bb.Ib * bp.ϵ # I=Ibb*ϵ
             end
@@ -300,7 +308,7 @@ Input:
     function residual!(bp::MWPPoint , x::AbstractVector)
         feval!(bp,x)   # feval! calculates function value only if current x is not the same as 
         @. bp.r =bp.bb.I_measured - bp.Ic # measured data - calculated 
-        bp.bb.r[] = 0.5*norm(bp.r)^2 # discrepancy value
+        bp.bb.r[] = 0.5 * norm(bp.r)^2 # discrepancy value
         return bp.r # returns residual vector
     end
     
@@ -371,7 +379,7 @@ Input:
     current spectral band pytometry point     
 """
     function grad!(g::AbstractVector , x::AbstractVector  , bp::MWPPoint)
-        residual!(bp , x)
+        residual!( bp , x)
         jacobian!( bp , x) # calculated Jₘ
         g .= - transpose(bp.jacobian) * bp.r # calculates gradient ∇f = -Jₘᵀ*r
         return g
@@ -419,6 +427,12 @@ Input:
     bp - (modified) current spectral band pytometry point      
 """
 function hess!(h , x::AbstractVector , bp::MWPPoint)
+        hess!(bp , x)
+        copyto!(h , bp.hessian) # filling external matrix with internally stored hessian
+        return h
+    end
+
+    function hess!(bp::MWPPoint , x)
         if x != bp.x_hess_vec
             hess_approx!(bp.hessian , x , bp) # refresh the approximate hessian 
             # and fill hessian with approximate hessian Jᵀ*J
@@ -434,19 +448,26 @@ function hess!(h , x::AbstractVector , bp::MWPPoint)
             # initial formula: Hm_vec = Vᵀ*I'ᴰ*r  => transpose(V)*diagm(I')*r 
             # A*diagm(b) <=> A.*transpose(b) <=> transpose(Aᵀ.*b) 
             # Hm_vec = (V.*I')ᵀ*r
-            last_hess_col .-= transpose(bp.vandermonde.v .* bp.bb.∇I)*bp.r
-            bp.hessian[end,1:end-1] .= last_hess_col # the sample
+            last_hess_col .-= transpose(bp.vandermonde.v .* bp.bb.∇I) * bp.r
+            bp.hessian[end , 1:end-1] .= last_hess_col # the sample
             # only right-down corner of hessian contains the second derivative
             # hm = rᵀ*(∇²Ibb)ᴰ*V*a
             bp.hessian[end,end] =bp.hessian[end,end] - dot(bp.r.*bp.bb.∇²I,bp.ϵ) # dot product
             bp.x_hess_vec .= x
         end
-        copyto!(h , bp.hessian) # filling external matrix with internally stored hessian
-        return h
     end
 
-    function evaluate_box_constraints(::BBPoint{N, Nx3, T} , emissivity_range::B=nothing, temperature_constraint::C = nothing) where {N, Nx3, T, B<:Union{NTuple{2,T},Nothing},C<:Union{NTuple{2,T},Nothing} }
-        return isnothing(temperature_constraint) ? DEFAULT_TEMPERATURE_RANGE[] : (temperature_constraint[1], temperature_constraint[2]) # limits on the BB temperature
+    function evaluate_box_constraints(::BBPoint{N, Nx3, T} , 
+                            emissivity_range::B=nothing, 
+                            temperature_constraint::C = nothing) where {N, Nx3, T, 
+                                                                        B <:Union{NTuple{2 , T} , Nothing} ,
+                                                                        C <: Union{NTuple{2 , T} , Nothing} }
+        
+        return if isnothing(temperature_constraint) 
+            DEFAULT_TEMPERATURE_RANGE[] 
+        else 
+            (temperature_constraint[1], temperature_constraint[2]) # limits on the BB temperature
+        end
     end
 
     """
@@ -463,7 +484,7 @@ polynomial basis
         fill!(ub , last(val_bounds))
 
     end
-    fill_emissivity_box_constraint!(lb , ub , V::VanderMatrix{N,CN,T},::Nothing) where {N,CN,T} = fill_emissivity_box_constraint!(lb , ub , V, (zero(T) , one(T)))
+    fill_emissivity_box_constraint!(lb , ub , V::VanderMatrix{N,CN,T} , ::Nothing) where {N , CN , T} = fill_emissivity_box_constraint!(lb , ub , V, T.(DEFAULT_EMISSIVITY_RANGE[]))
 
     function fill_emissivity_box_constraint!(lb , ub , ::VanderMatrix{N , CN , T},
                     val_bounds::NTuple{2 , <:Union{NTuple{CN , T}, StaticVector{CN , T}}}) where {N, CN, T}
@@ -559,9 +580,9 @@ Input:
 """
 function grad!(g::AbstractVector, t::Number , e::BBPoint)
         ∇!(e , t)
-        residual!(e,t)
+        residual!(e , t)
         if t!=e.Tgrad[]
-            g[end]= - dot(e.ri,e.∇I) # filling gradient vector
+            g[end]= - dot(e.ri , e.∇I) # filling gradient vector
             e.Tgrad[] = t
         end
         return g
@@ -586,7 +607,7 @@ function ∇²!(e::BBPoint , t::Number)
         end
         return e.∇²I
     end
-    hess!(h , T::AbstractVector,e::BBPoint) = hess!(h,T[end],e)
+    hess!(h , T::AbstractVector , e::BBPoint) = hess!(h,T[end],e)
     """
     hess!(h,t::Float64,e::BBPoint)
 
@@ -621,9 +642,9 @@ function hess!(h , t::Number , e::BBPoint{M , N , T}) where { M , N ,T <: Number
     fitting_result(point::Union{MWPPoint , BBPoint} , _, _ , _ , ::Val{:T}) = temperature(point)
     fitting_result(point::BBPoint , results , probl , optimizer ,::Val{:full}) = (T=temperature(point), 
                                                                     res=results, problem = probl ,  optimizer=optimizer)
-    function trim_starting_vector_to_box!(v,lb,ub)
-        for (i,(l,u)) in enumerate(zip(lb,ub))
-             l <= v[i] && v[i] <= u ? continue :  v[i] = (l + u)/2
+    function trim_starting_vector_to_box!(v , lb , ub)
+        for (i , (l , u)) in enumerate(zip(lb , ub))
+             (l <= v[i]) && (v[i] <= u) ? continue :  v[i] = (l + u)/2
         end
     end
 
@@ -631,8 +652,9 @@ function fit_T!(p::Union{BBPoint , MWPPoint},
             o = nothing;
             emissivity_range::C=nothing, 
             temperature_range::B=nothing , 
-            result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector,Nothing,NTuple{2}} , 
-                              C <: Union{AbstractVector,Nothing,NTuple{2}} , D }  
+            result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector , Nothing , NTuple{2}} , 
+                                                  C <: Union{AbstractVector , Nothing , NTuple{2}} , 
+                                                  D }  
 
         sv = get_default_starting_vector(p)
         return fit_T!(p , sv , o ;
@@ -642,26 +664,56 @@ function fit_T!(p::Union{BBPoint , MWPPoint},
 end
 get_default_starting_vector(::BBPoint{M , N, T}) where {M , N, T} = MVector{1}(T(1000.0))
 get_default_starting_vector(p::MWPPoint) = MVector(p.x)
-function fit_T!(point::Union{BBPoint , MWPPoint}, 
-            starting_vector::AbstractVector,
-            optimizer = nothing;
-            emissivity_range::C=nothing, 
-            temperature_range::B=nothing , 
-            result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector,Nothing,NTuple{2}} , 
-                              C <: Union{AbstractVector,Nothing,NTuple{2}} , D }
 
+function fit_T!(point::Union{BBPoint , MWPPoint}, 
+                    starting_vector::AbstractVector,
+                    optimizer = nothing;
+                    emissivity_range::C=nothing, 
+                    temperature_range::B=nothing , 
+                    result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector , Nothing , NTuple{2}} , 
+                                                  C <: Union{AbstractVector , Nothing , NTuple{2}} , 
+                                                  D }
+                                          
         (lb , ub) = evaluate_box_constraints(point, emissivity_range, temperature_range)
         trim_starting_vector_to_box!(starting_vector , lb , ub)
         (results , optimizer , problem) = _solve_problem(point , starting_vector , lb , ub , optimizer)
         return  fitting_result(point, results, optimizer , problem , result_type) 
                         
 end
-function (emp::Union{BBPoint,MWPPoint})(I::Union{AbstractVector , Number}) 
-    copyto!(emp.I_measured , I)
-    return fit_T!(emp)
-end
-(emp::Union{BBPoint,MWPPoint})() =fit_T!(emp)
 
+function (emp::Union{BBPoint , MWPPoint})(I::Union{AbstractVector , Number}; kwargs...) 
+    copyto!(emp.I_measured , I)
+    return fit_T!(emp ; kwargs...)
+end
+
+function (emp::Union{BBPoint , MWPPoint})(;optimizer=nothing , starting_vector :: Union{Nothing , AbstractVector} = nothing,
+                    temperature_range = nothing , emissivity_range = nothing , 
+                    result_type=Val(:T))
+
+                    isnothing(starting_vector) && return fit_T!(emp , optimizer ; 
+                                                            emissivity_range = emissivity_range , 
+                                                            temperature_range = temperature_range , 
+                                                            result_type = result_type)
+
+                    return fit_T!(emp , starting_vector , optimizer ; 
+                            emissivity_range = emissivity_range , 
+                            temperature_range = temperature_range , 
+                            result_type = result_type)
+    end
+"""
+    try_emissivity(bb::BBPoint , ϵ::Number)
+
+divides the measured intensity by the input emissivity 
+"""
+function try_emissivity(bbp::BBPoint , ϵ::Number)
+    (abs(ϵ) < 1e-8) && return 1e8
+    bbp.I_measured ./= ϵ 
+    # dividing by emissivity 
+    # copyto!(emp.I_measured,I)
+    T =  bbp()
+    bbp.I_measured .*= ϵ
+    return T
+end
 function _solve_problem(point , starting_vector , lb , ub , optimizer) error("To use multiwavelength pyrometry one must add Optimization package to the working env") end
 
 
@@ -671,3 +723,28 @@ struct MultiWavelengthPyrometer{N , T , MWP} <: AbstractPyrometer{N,T}
     mwp::MWP
 end
 
+
+
+
+function newtone_step(x , p::MWPPoint{N, Nx3, P}) where {N, Nx3, P}
+    hess!(p , x)
+    return SVector{P}(-p.hessian \(transpose(p.jacobian) * p.r))
+end
+function simple_newton_search(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T} , x::MVector{P}) where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
+    n = 0
+    d = disc(x , mwp)
+    g = MVector{P , T}(undef)
+    while (d >= 1e-6) && (n <= 10)
+        #hess!(mwp , x)
+        #mul!(g , transpose(mwp.jacobian) , mwp.r)
+        #@show g
+        p = newtone_step(x , mwp)#-mwp.hessian\g
+        @show p
+        @. x = x + p 
+        #@show x
+        d = disc(x , mwp)
+        @show d
+        n += 1
+    end
+    return temperature(mwp)
+end
