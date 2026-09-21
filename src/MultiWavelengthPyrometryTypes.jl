@@ -708,9 +708,9 @@ function fit_T!(point::Union{BBPoint , MWPPoint},
                         
 end
 
-function (emp::MWPPoint)(I::Union{AbstractVector , Number};starting_vector = nothing ,  kwargs...) 
-    copyto!(emp.bb.I_measured , I)
-    return fit_T!(emp , starting_vector ; kwargs...)
+function (emp::MWPPoint)(I::AbstractVector;  kwargs...) 
+    set_measured!(emp , I)
+    return fit_T!(emp  ; kwargs...)
 end
 function (emp::BBPoint)(I::Union{AbstractVector , Number}; kwargs...) 
     copyto!(emp.I_measured , I)
@@ -864,39 +864,28 @@ function fit_blackbody_safeguarded!(
     tol = T_type(1e-6)
     
     for iter in 1:max_iter
-        # 1. Вычисляем физику в текущей точке T_curr
-        #x_vec[1] = T_curr
-        f_val = grad!(bb , T_curr)  # Заполняет g_vec (градиент критерия)
-        f_prime = hess!(bb, T_curr)         # Заполняет bb.hessian (Гессиан)
+\
+        f_val = grad!(bb , T_curr)  
+        f_prime = hess!(bb, T_curr)         
         
-        # Извлекаем скалярные значения
-        # = g_vec[1]
-        # = bb.hessian[1] # Предполагаем, что это элемент 1х1 матрицы или скаляр
-        
-        # Проверяем сходимость по величине градиента
         if abs(f_val) < tol
             break
         end
         
-        # 2. Динамически сужаем границы неопределенности [a, b] на основе знака градиента
-        # Если градиент положительный, минимум находится левее текущей точки, если отрицательный — правее.
         if f_val > 0
             b = min(b, T_curr)
         else
             a = max(a, T_curr)
         end
         
-        # Проверяем, не схлопнулись ли границы
         if (b - a) < tol
             T_curr = 0.5 * (a + b)
             break
         end
         
-        # 3. Вычисляем вторую производную градиента (для Халлея) без аллокаций
         f_prime_prime = 3.0 * dot(bb.∇I, bb.∇²I)
         
-        # 4. Пробуем вычислить классический шаг Халлея
-        # Формула шага Халлея: ΔT = (2 * f * f') / (2 * f'^2 - f * f'')
+        # Halley: ΔT = (2 * f * f') / (2 * f'^2 - f * f'')
         denominator = 2.0 * f_prime^2 - f_val * f_prime_prime
         
         step_computed = false
@@ -906,20 +895,16 @@ function fit_blackbody_safeguarded!(
             ΔT = (2.0 * f_val * f_prime) / denominator
             T_next = T_curr - ΔT
             
-            # Проверяем, безопасен ли шаг Халлея (лежит ли он строго внутри суженных границ [a, b])
-            # Также проверяем, что шаг не слишком близок к краям, чтобы гарантировать сходимость
             if a + tol < T_next < b - tol
                 step_computed = true
             end
         end
         
-        # 5. Если шаг Халлея плохой или привел к делению на ноль — делаем шаг дихотомии (Bisection)
-        # Для гладких функций деление пополам сужающегося интервала работает стабильнее и быстрее золотого сечения
+       # bisection if halleys doesnt work 
         if !step_computed
             T_next = 0.5 * (a + b)
         end
         
-        # Обновляем текущую температуру
         T_curr = T_next
     end
     return (bb , nothing , DefaultOptimizer())
