@@ -20,6 +20,7 @@ measure(p::AbstractPyrometer , i::Number  , ϵ::Union{Number , NTuple{2,<:Number
 
 measure(p::RatioPyrometer , i::NTuple{2,D} ,  ϵ::NTuple{2 , <:Number} ; kwargs...) where {D <: Number} = measure(p , i[1]/i[2] , ϵ ; kwargs...)
 
+
 """
     measure(p::AbstractPyrometer , i::Union{IsothermalSpectralQuantity , AbstractDiscreteQuantity}; 
                     T_starting::Number = 1000.0  , 
@@ -257,6 +258,13 @@ function (ctx::SpectralQuantityPyrometricContext{L, E})(t) where {L <: Tuple{Num
     return _to_halley(Planck.Dₜspectral_ratio(ctx.λ[1], ctx.λ[2], t), ctx.i_measured, ratio_constant)
 end
 
+# Multiwavelength pyrometry 
+
+measure(p::MultiWavelengthPyrometer , i::AbstractVector; 
+                                starting_vector = nothing , kwargs...) = p.mwp(i; starting_vector = starting_vector)
+
+#measure(p::MultiWavelengthPyrometer , i::Union{IsothermalSpectralQuantity , Abstract}; 
+                        #starting_vector = nothing) = p.mwp(i.(wavelength(p)); starting_vector = starting_vector)
 
 
 

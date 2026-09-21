@@ -1,7 +1,9 @@
 
 # MultiwavlengthPyrometryTypes should be included in the MultiwavlengthPyrometry module
-const DEFAULT_TEMPERATURE_RANGE = Ref((20.0 , 3000.0)) # default temperture range used for bounded optimization
+const DEFAULT_TEMPERATURE_RANGE = Ref((20.0 , 10000.0)) # default temperture range used for bounded optimization
 const DEFAULT_EMISSIVITY_RANGE = Ref((0.1 , 1.0))
+struct DefaultOptimizer end
+(d::DefaultOptimizer)() = d
 #function 
 """
 BBPoint type stores data on thermal emission spectrum and its 
@@ -264,7 +266,7 @@ Input:
 """
 function emissivity!(bp::MWPPoint , x::AbstractVector)
     a = @view x[1:end-1] #emissivity approximation variables
-    return mul!(bp.ϵ, bp.vandermonde.v,a)
+    return mul!(bp.ϵ , bp.vandermonde.v , a)
 end
 
 
@@ -283,7 +285,7 @@ Input:
         # evaluates residual vector
         #a = @view x[1:end-1] #emissivity approximation variables
         feval!(bp.bb , x[end]) # refreshes planck function values
-        if x!=bp.x_em_vec # x_em_vec - emissivity calculation vector
+        if x != bp.x_em_vec # x_em_vec - emissivity calculation vector
             emissivity!(bp,x)
             if bp.is_has_Iₛᵤᵣ # has surrounding radiation correction
                 @. bp.Ic = (bp.bb.Ib - bp.bb.Iₛᵤᵣ) * bp.ϵ # I=(Ibb-Isur)*ϵ
@@ -350,14 +352,16 @@ Input:
 """
 function jacobian!(bp::MWPPoint , x::AbstractVector) # evaluates Planck function
         ∇!(bp.bb , x[end]) # refresh Planck function first derivative
-        if x!=bp.x_jac_vec
-            J1 = @view bp.jacobian[:,1:end-1] # Jacobian without temperature derivatives
+        if x != bp.x_jac_vec
+            J1 = @view bp.jacobian[: , 1:end-1] # Jacobian without temperature derivatives
             J2 = @view bp.jacobian[:,end] # Last column of the jacobian 
             #a  = @view (x,1,end-1)
-            J1 .= bp.bb.Ib .* bp.vandermonde.v # diag(ibb)*V
-            J2 .= bp.bb.∇I .* emissivity!(bp,x)# 
-            bp.x_jac_vec .=x # refresh jacobian calculation vector
+            eps_vec = emissivity!(bp, x)
+            @. J1 = bp.bb.Ib * bp.vandermonde.v # diag(ibb)*V
+            @. J2 = bp.bb.∇I * eps_vec# 
+            copyto!(bp.x_jac_vec , x) # refresh jacobian calculation vector
         end
+        return bp.jacobian
     end   
 
     """
@@ -382,6 +386,11 @@ Input:
         residual!( bp , x)
         jacobian!( bp , x) # calculated Jₘ
         g .= - transpose(bp.jacobian) * bp.r # calculates gradient ∇f = -Jₘᵀ*r
+        # mul!(g, transpose(bp.jacobian), bp.r, -1.0, 0.0) # gives an error ! (bug ?)
+        #J_static = SMatrix(bp.jacobian)
+        #r_static = SVector(bp.r)
+        
+        #g .= - (transpose(J_static) * r_static)
         return g
     end
 
@@ -401,15 +410,19 @@ Input:
 """
 function hess_approx!(ha , x::AbstractVector  , bp::MWPPoint)
         # calculates approximate hessian which is Hₐ = Jᵀ*J (J - Jacobian)
-        if x!=bp.x_hess_approx
-            jacobian!(bp , x)
-            bp.hessian_approx .= transpose(bp.jacobian)*bp.jacobian 
-            # this matrix is always symmetric positive definite
-            bp.x_hess_approx .=x
-        end
-        ha .= bp.hessian_approx
-        return nothing
+        ha .= hess_approx!(bp, x) 
+        return ha
     end
+    function hess_approx!(bp::MWPPoint , x::AbstractVector )
+        # calculates approximate hessian which is Hₐ = Jᵀ*J (J - Jacobian)
+        if x != bp.x_hess_approx
+            jacobian!(bp , x)
+            bp.hessian_approx .= transpose(bp.jacobian) * bp.jacobian 
+            # this matrix is always symmetric positive definite
+            copyto!(bp.x_hess_approx , x)
+        end
+        return bp.hessian_approx
+    end    
     """
     hess!(h , x::AbstractVector,bp::MWPPoint)
     
@@ -453,7 +466,7 @@ function hess!(h , x::AbstractVector , bp::MWPPoint)
             # only right-down corner of hessian contains the second derivative
             # hm = rᵀ*(∇²Ibb)ᴰ*V*a
             bp.hessian[end,end] =bp.hessian[end,end] - dot(bp.r.*bp.bb.∇²I,bp.ϵ) # dot product
-            bp.x_hess_vec .= x
+            copyto!(bp.x_hess_vec  , x)
         end
     end
 
@@ -562,13 +575,12 @@ Input:
 """
 function ∇!(e::BBPoint , t::Number) # evaluates Planck function first derivative
         feval!(e,t)# refreshes amat and Ib
-        if t!=e.T∇ib[] # current temperature is not equal to the temperature of gradient calculation
+        if t != e.T∇ib[] # current temperature is not equal to the temperature of gradient calculation
             Planck.∇ₜibb!(e.∇I,t, e.amat,e.Ib)# fills Planck first derivative
             e.T∇ib[] = t # refresh gradient calculation temperature
         end
         return e.∇I
     end
-    grad!(g::AbstractVector, T::AbstractVector , e::BBPoint)=grad!(g,T[end] ,e)
     """
     grad!(g::AbstractVector,t::Float64 ,e::BBPoint)
 
@@ -579,15 +591,20 @@ Input:
     e - (modified) current bb thermal emission ppoint 
 """
 function grad!(g::AbstractVector, t::Number , e::BBPoint)
-        ∇!(e , t)
-        residual!(e , t)
-        if t!=e.Tgrad[]
-            g[end]= - dot(e.ri , e.∇I) # filling gradient vector
-            e.Tgrad[] = t
-        end
+        g[] =  grad!(e , t)
         return g
     end
-
+grad!(e::BBPoint , t::AbstractVector) = grad!(e , last(t))
+grad!(g::AbstractVector, t::AbstractVector , e::BBPoint) = grad!(g, last(t) , e)
+function grad!(e::BBPoint , t::Number)
+        ∇!(e , t)
+        residual!(e , t)
+        if t != e.Tgrad[]
+            ∇!(e , t)
+            residual!(e , t)
+        end
+        return - dot(e.ri , e.∇I)
+    end
     ∇²!(e::BBPoint , T::AbstractVector)=∇²!(e , T[end])
 
     """
@@ -607,7 +624,8 @@ function ∇²!(e::BBPoint , t::Number)
         end
         return e.∇²I
     end
-    hess!(h , T::AbstractVector , e::BBPoint) = hess!(h,T[end],e)
+    hess!(h , T::AbstractVector , e::BBPoint) = hess!(h , T[end],e)
+    hess!(e::BBPoint , T::AbstractVector ) = hess!(e , T[end])
     """
     hess!(h,t::Float64,e::BBPoint)
 
@@ -624,14 +642,19 @@ In-place filling of least-square problem hessian matrix
         e - (modified) current bb thermal emission point  
 """
 function hess!(h , t::Number , e::BBPoint{M , N , T}) where { M , N ,T <: Number} # calculates hessian of a simple Planck function fitting
-        ∇²!(e , t)
-        if t != e.Thess[]
-            e.Thess[] = T(t)
-            h[]= dot(e.∇I , e.∇I) - dot(e.ri , e.∇²I)
-        end
-        
+        h[] = hess!(e , t)
         return h
     end
+function hess!(e::BBPoint{M , N , T} , t::Number ) where { M , N ,T <: Number} # calculates hessian of a simple Planck function fitting
+        if t != e.Thess[]
+            e.Thess[] = T(t)
+            ∇²!(e , t)
+        end
+        return dot(e.∇I , e.∇I) - dot(e.ri , e.∇²I)
+    end
+
+
+
     function fitting_result(point::MWPPoint , results, probl , optimizer , ::Val{:full}) 
         return (T=temperature(point) , a=results.u[1:end-1],
                                     ϵ=point.vandermonde*results.u[1:end-1],
@@ -640,8 +663,12 @@ function hess!(h , t::Number , e::BBPoint{M , N , T}) where { M , N ,T <: Number
                                     optimizer=optimizer)
     end
     fitting_result(point::Union{MWPPoint , BBPoint} , _, _ , _ , ::Val{:T}) = temperature(point)
+
     fitting_result(point::BBPoint , results , probl , optimizer ,::Val{:full}) = (T=temperature(point), 
                                                                     res=results, problem = probl ,  optimizer=optimizer)
+
+    fitting_result(point::BBPoint , results , probl , optimizer::DefaultOptimizer ,::Val{:full}) = (T=temperature(point), 
+                                                                    res=results, problem = probl ,  optimizer=optimizer)                                                                
     function trim_starting_vector_to_box!(v , lb , ub)
         for (i , (l , u)) in enumerate(zip(lb , ub))
              (l <= v[i]) && (v[i] <= u) ? continue :  v[i] = (l + u)/2
@@ -667,7 +694,7 @@ get_default_starting_vector(p::MWPPoint) = MVector(p.x)
 
 function fit_T!(point::Union{BBPoint , MWPPoint}, 
                     starting_vector::AbstractVector,
-                    optimizer = nothing;
+                    optimizer = DefaultOptimizer();
                     emissivity_range::C=nothing, 
                     temperature_range::B=nothing , 
                     result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector , Nothing , NTuple{2}} , 
@@ -681,14 +708,20 @@ function fit_T!(point::Union{BBPoint , MWPPoint},
                         
 end
 
-function (emp::Union{BBPoint , MWPPoint})(I::Union{AbstractVector , Number}; kwargs...) 
+function (emp::MWPPoint)(I::Union{AbstractVector , Number};starting_vector = nothing ,  kwargs...) 
+    copyto!(emp.bb.I_measured , I)
+    return fit_T!(emp , starting_vector ; kwargs...)
+end
+function (emp::BBPoint)(I::Union{AbstractVector , Number}; kwargs...) 
     copyto!(emp.I_measured , I)
     return fit_T!(emp ; kwargs...)
 end
 
-function (emp::Union{BBPoint , MWPPoint})(;optimizer=nothing , starting_vector :: Union{Nothing , AbstractVector} = nothing,
-                    temperature_range = nothing , emissivity_range = nothing , 
-                    result_type=Val(:T))
+function (emp::Union{BBPoint , MWPPoint})(; optimizer = DefaultOptimizer() , 
+                                            starting_vector :: Union{Nothing , AbstractVector} = nothing,
+                                            temperature_range = nothing , 
+                                            emissivity_range = nothing , 
+                                            result_type=Val(:T))
 
                     isnothing(starting_vector) && return fit_T!(emp , optimizer ; 
                                                             emissivity_range = emissivity_range , 
@@ -705,46 +738,199 @@ function (emp::Union{BBPoint , MWPPoint})(;optimizer=nothing , starting_vector :
 
 divides the measured intensity by the input emissivity 
 """
-function try_emissivity(bbp::BBPoint , ϵ::Number)
-    (abs(ϵ) < 1e-8) && return 1e8
-    bbp.I_measured ./= ϵ 
+function try_emissivity(bbp::Union{BBPoint{N} , MWPPoint{N}}  , ϵ::ET  ) where ET <: Union{Number , SVector{N}} where N
+    if ET <: Number
+        (abs(ϵ) < 1e-8) && return 1e8
+    else
+        for e in ϵ
+            (abs(e) < 1e-8) && return 1e8
+        end
+    end
+    I_test = SVector(measured(bbp))
     # dividing by emissivity 
-    # copyto!(emp.I_measured,I)
-    T =  bbp()
-    bbp.I_measured .*= ϵ
+    T =  bbp( I_test./ϵ)
+    set_measured!(bbp , I_test)
     return T
 end
 function _solve_problem(point , starting_vector , lb , ub , optimizer) error("To use multiwavelength pyrometry one must add Optimization package to the working env") end
 
 
 
+function _solve_problem(point::MWPPoint{N, Nx3, P} , starting_vector , lb , ub , ::DefaultOptimizer) where {N, Nx3, P}
+    
+    return robust_lm_search!(point, 
+                    MVector{P}(starting_vector) ,  
+                    SVector(lb),  
+                    SVector(ub))  
+
+end
 
 struct MultiWavelengthPyrometer{N , T , MWP} <: AbstractPyrometer{N,T}
     mwp::MWP
+    function MultiWavelengthPyrometer(mwp::MWP) where MWP <: MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T} where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
+        return new{N , T , MWP}(mwp)
+    end
+end
+wavelength(p::MultiWavelengthPyrometer) = p.mwp.bb.λ
+measured(p::MultiWavelengthPyrometer) = measured(p.mwp)
+calculated(p::MultiWavelengthPyrometer) = p.mwp.Ic
+emissivity(p::MultiWavelengthPyrometer) = p.mwp.ϵ
+measured(p::MWPPoint) = measured(p.bb)
+measured(p::BBPoint) = p.I_measured
+
+set_measured!(p::BBPoint , i::AbstractVector) = copyto!(p.I_measured , i)
+set_measured!(p::MWPPoint , i::AbstractVector) = set_measured!(p.bb , i)
+set_measured!(p::MultiWavelengthPyrometer , i::AbstractVector) = set_measured!(p.mwp , i)
+"""
+    lm_step(x, p::MWPPoint{N, Nx3, P}, λ::Real) where {N, Nx3, P}
+
+Function to evaluate the Levenberg-Marquardt step 
+"""
+function lm_step(x, p::MWPPoint{N, Nx3, P}, λ::Real) where {N, Nx3, P}
+    hess!(p, x) 
+    H = SMatrix(p.hessian)
+    J = SMatrix(p.jacobian)
+    r = SVector(p.r)
+    Jt = transpose(J)
+    Δx = (H + λ * I) \ (- Jt* r)
+    return Δx
 end
 
+function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}, 
+                x::MVector{P , T} ,  
+                lower_bounds::SVector{P, T},  
+                upper_bounds::SVector{P, T}; 
+                atol::Real = 1e-8 , max_num_steps::Int = 500) where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
 
-
-
-function newtone_step(x , p::MWPPoint{N, Nx3, P}) where {N, Nx3, P}
-    hess!(p , x)
-    return SVector{P}(-p.hessian \(transpose(p.jacobian) * p.r))
-end
-function simple_newton_search(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T} , x::MVector{P}) where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
     n = 0
-    d = disc(x , mwp)
-    g = MVector{P , T}(undef)
-    while (d >= 1e-6) && (n <= 10)
-        #hess!(mwp , x)
-        #mul!(g , transpose(mwp.jacobian) , mwp.r)
-        #@show g
-        p = newtone_step(x , mwp)#-mwp.hessian\g
-        @show p
-        @. x = x + p 
-        #@show x
-        d = disc(x , mwp)
-        @show d
+    d_current = disc(x, mwp) 
+    λ = 1e-2 
+    x_trial = copy(x)
+    
+    while (d_current >= atol) && (n <= max_num_steps) 
+        
+        p_step = lm_step(x, mwp, λ) #lm step calculation 
+        
+        @. x_trial = x - p_step
+    
+        @. x_trial = clamp(x_trial, lower_bounds, upper_bounds)
+
+        if any(isnan, x_trial)
+            λ *= 10.0
+            n += 1
+            continue
+        end 
+
+        d_trial = disc(x_trial, mwp)
+
+       if d_trial < d_current
+            @. x = x_trial      # success
+            d_current = d_trial 
+            λ /= 5.0            # reduce demping factor 
+        else
+            λ *= 7.0            # unsuccesfull step increase demping
+        end
+        #@show λ
         n += 1
     end
-    return temperature(mwp)
+    copyto!(mwp.x , x_trial)
+    return (mwp , (λ = λ , n = n , d = d_current) , DefaultOptimizer())
+end
+
+
+
+
+"""
+Сверхбыстрый одномерный поиск температуры для BBPoint с жесткими границами.
+Сочетает кубическую скорость метода Халлея и 100% надежность дихотомии.
+"""
+function fit_blackbody_safeguarded!(
+    bb::BBPoint{N, Nx3, T_type}, 
+    T_start::Real, 
+    T_min::Real, 
+    T_max::Real
+            ) where {N, Nx3, T_type}
+
+    # Зажимаем стартовую точку в границы на всякий случай
+    T_curr = clamp(T_type(T_start), T_type(T_min), T_type(T_max))
+    
+    # Инициализируем динамические границы поиска
+    a::T_type = T_min
+    b::T_type = T_max
+    
+    # Временные буферы для вызова ваших функций (на стеке)
+   # x_vec = MVector{1, T_type}(T_curr)
+    max_iter = 30
+    tol = T_type(1e-6)
+    
+    for iter in 1:max_iter
+        # 1. Вычисляем физику в текущей точке T_curr
+        #x_vec[1] = T_curr
+        f_val = grad!(bb , T_curr)  # Заполняет g_vec (градиент критерия)
+        f_prime = hess!(bb, T_curr)         # Заполняет bb.hessian (Гессиан)
+        
+        # Извлекаем скалярные значения
+        # = g_vec[1]
+        # = bb.hessian[1] # Предполагаем, что это элемент 1х1 матрицы или скаляр
+        
+        # Проверяем сходимость по величине градиента
+        if abs(f_val) < tol
+            break
+        end
+        
+        # 2. Динамически сужаем границы неопределенности [a, b] на основе знака градиента
+        # Если градиент положительный, минимум находится левее текущей точки, если отрицательный — правее.
+        if f_val > 0
+            b = min(b, T_curr)
+        else
+            a = max(a, T_curr)
+        end
+        
+        # Проверяем, не схлопнулись ли границы
+        if (b - a) < tol
+            T_curr = 0.5 * (a + b)
+            break
+        end
+        
+        # 3. Вычисляем вторую производную градиента (для Халлея) без аллокаций
+        f_prime_prime = 3.0 * dot(bb.∇I, bb.∇²I)
+        
+        # 4. Пробуем вычислить классический шаг Халлея
+        # Формула шага Халлея: ΔT = (2 * f * f') / (2 * f'^2 - f * f'')
+        denominator = 2.0 * f_prime^2 - f_val * f_prime_prime
+        
+        step_computed = false
+        T_next = T_curr
+        
+        if abs(denominator) > 1e-12
+            ΔT = (2.0 * f_val * f_prime) / denominator
+            T_next = T_curr - ΔT
+            
+            # Проверяем, безопасен ли шаг Халлея (лежит ли он строго внутри суженных границ [a, b])
+            # Также проверяем, что шаг не слишком близок к краям, чтобы гарантировать сходимость
+            if a + tol < T_next < b - tol
+                step_computed = true
+            end
+        end
+        
+        # 5. Если шаг Халлея плохой или привел к делению на ноль — делаем шаг дихотомии (Bisection)
+        # Для гладких функций деление пополам сужающегося интервала работает стабильнее и быстрее золотого сечения
+        if !step_computed
+            T_next = 0.5 * (a + b)
+        end
+        
+        # Обновляем текущую температуру
+        T_curr = T_next
+    end
+    return (bb , nothing , DefaultOptimizer())
+end
+
+
+function _solve_problem(point::BBPoint , starting_vector , lb , ub , ::DefaultOptimizer)
+    
+    return fit_blackbody_safeguarded!(point, 
+                    starting_vector[] ,  
+                    lb[],  
+                    ub[])  
+
 end

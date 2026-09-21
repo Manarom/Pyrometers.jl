@@ -15,6 +15,7 @@ module Pyrometers
         SingleWavelengthPyrometer , 
         TwoBandsRatioPyrometer ,
         TwoWavelengthRatioPyrometer , 
+        MultiWavelengthPyrometer , 
         convert_temperature,
         integral_emissivity,
         DefaultPyrometersTypes,
@@ -71,7 +72,7 @@ integrate(l1::Number , l2::Number , i::AbstractDiscreteQuantity) = begin
         (_l , _i) = subrange_view(l1 , l2 , i)
         return _simpson(_l , _i)
 end
-integrate(l1 , l2 , _::Number , i::AbstractDiscreteQuantity) = integrate(l1,l2 ,i)
+integrate(l1 , l2 , _::Number , i::AbstractDiscreteQuantity) = integrate(l1 , l2 , i)
 """
     TabularQuantity{LT <: AbstractVector , ET <: AbstractVector} <: AbstractDiscreteQuantity{LT , ET }
 
@@ -441,7 +442,9 @@ integrate(p::TwoWavelengthRatioPyrometer , t , intensity::AbstractContinuousOrDi
             intensity(p.λ[2] , t)
             )
 end
-                    
+function integrate(p::MultiWavelengthPyrometer{N} , intensity::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}; kwargs...) where N 
+    SVector{N}(intensity.(wavelength(p)))
+end               
 abstract type AbstractRadiationGeometry end
 """ 
     Type stores the geometry parameter `ξ= F * A₁/A₂` , where `F` is view factor  , 
