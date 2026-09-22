@@ -676,7 +676,7 @@ function hess!(e::BBPoint{M , N , T} , t::Number ) where { M , N ,T <: Number} #
     end
 
 function fit_T!(p::Union{BBPoint , MWPPoint},
-            o = nothing;
+            o = DefaultOptimizer();
             emissivity_range::C=nothing, 
             temperature_range::B=nothing , 
             result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector , Nothing , NTuple{2}} , 
@@ -708,13 +708,13 @@ function fit_T!(point::Union{BBPoint , MWPPoint},
                         
 end
 
-function (emp::MWPPoint)(I::AbstractVector;  kwargs...) 
+function (emp::MWPPoint)(I::AbstractVector; optimizer = DefaultOptimizer(), kwargs...) 
     set_measured!(emp , I)
-    return fit_T!(emp  ; kwargs...)
+    return fit_T!(emp , optimizer ;  kwargs...)
 end
-function (emp::BBPoint)(I::Union{AbstractVector , Number}; kwargs...) 
+function (emp::BBPoint)(I::Union{AbstractVector , Number}; optimizer = DefaultOptimizer(), kwargs...) 
     copyto!(emp.I_measured , I)
-    return fit_T!(emp ; kwargs...)
+    return fit_T!(emp ,optimizer ;  kwargs...)
 end
 
 function (emp::Union{BBPoint , MWPPoint})(; optimizer = DefaultOptimizer() , 
@@ -864,7 +864,7 @@ function fit_blackbody_safeguarded!(
     tol = T_type(1e-6)
     
     for iter in 1:max_iter
-\
+
         f_val = grad!(bb , T_curr)  
         f_prime = hess!(bb, T_curr)         
         
