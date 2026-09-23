@@ -38,8 +38,12 @@ const DefaultPyrometersTypes = OrderedDict(
                     :K => SVector{2}([8.0, 9.0]),
                     :B => SVector{2}([9.1,14.0])
     )
-    include("pyrometers_types.jl")
     abstract type AbstractDiscreteQuantity{LT , ET} end
+    const IsothermalSpectralQuantity = Planck.IsothermalSpectralQuantity 
+    const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
+    const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
+    include("pyrometers_types.jl")
+    
     """
     subrange_view(λ1::Number , λ2::Number , e::AbstractDiscreteQuantity)
 
@@ -115,9 +119,6 @@ Type wrapper around discrete quantity with two columns `λ` and `i`
 
     
     # continuous spectral quantities 
-    const IsothermalSpectralQuantity = Planck.IsothermalSpectralQuantity 
-    const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
-    const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
     get_single_wavelength_value(l::Number, t::Number , e::AbstractSpectralQuantity ) = e(l , t)
     get_single_wavelength_value(l::NTuple{N}, t::Number , e::AbstractSpectralQuantity) where N =ntuple(N) do i 
         e(l[i] , t)
@@ -419,7 +420,7 @@ Returns the quantity, which is equal to the type of pyrometer signal , e.g. if p
 
 
 @inline function integrate(p::TwoBandsRatioPyrometer , t,
-     intensity_function::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}; segbuf=nothing, kwargs...) 
+     intensity_function::AbstractSpectralQuantity; segbuf=nothing, kwargs...) 
     band1, band2 = p.λ[1], p.λ[2]
     i1 = integrate(band1[1] , band1[2] , t ,  intensity_function; segbuf=segbuf, kwargs...)
     i2 = integrate(band2[1] , band2[2] , t ,  intensity_function; segbuf=segbuf, kwargs...)
@@ -443,8 +444,11 @@ integrate(p::TwoWavelengthRatioPyrometer , t , intensity::AbstractContinuousOrDi
             )
 end
 function integrate(p::MultiWavelengthPyrometer{N} , intensity::Union{AbstractDiscreteQuantity , IsothermalSpectralQuantity}; kwargs...) where N 
-    SVector{N}(intensity.(wavelength(p)))
-end               
+    SVector{N}(intensity.(wavelengths(p)))
+end 
+function integrate(p::MultiWavelengthPyrometer{N} , t::Number , intensity::AbstractSpectralQuantity; kwargs...) where N 
+    SVector{N}(intensity.(t , wavelengths(p)))
+end                   
 abstract type AbstractRadiationGeometry end
 """ 
     Type stores the geometry parameter `ξ= F * A₁/A₂` , where `F` is view factor  , 
@@ -1015,7 +1019,7 @@ function switch_the_type(λ::Float64)
     Base.show(io::IO, p::SpectralBandPyrometer) = print(io, "$(p.type) - type: spectral-band pyrometer:λ ∈ $(p.λ[1]) ... $(p.λ[2]) μm,ϵ = $(p.ϵ[])")
     Base.show(io::IO, p::TwoWavelengthRatioPyrometer) = print(io, "$(p.type) - type: two wavelength ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
     Base.show(io::IO, p::TwoBandsRatioPyrometer)  = print(io, "$(p.type) - type: two bands ratio pyrometer:λ₁= $(p.λ[1]) , λ₂ = $(p.λ[2]) μm, ϵ₁ = $(p.ϵ1[]) , ϵ₂ = $(p.ϵ2[]) , e_slope = $(e_slope(p))")
-    
+    #Base.show(io::IO , p::MultiWavelengthPyrometer{}) 
     shorthand(p)=  "$(p.type) : $(p.λ), μm"
     include("custom_integration_and_interpolation_funcs.jl")
 end

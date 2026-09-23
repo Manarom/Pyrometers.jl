@@ -21,6 +21,9 @@ bb = PlanckEmitter()
 l = range(1,2,50)
 Ttrue = 1076.894567 
 i = bb.(l , Ttrue)
+i_int = Pyrometers.integrate(1.0 , 2.0 , Pyrometers.fix_temperature(bb , Ttrue))
+Pyrometers.fit_integral(bb ,1.0 , 2.0 , i_int)
+
 
 bbp = Pyrometers.BBPoint(SVector{50}(i) , SVector{50}(l))
 bbp(bb.(l , 1685) )
@@ -82,9 +85,14 @@ const upp_b = SVector(1.2, 1.2, 1.2, 1473.15)
 )
 
 e = Pyrometers.IsothermalSpectralQuantity(l->0.8 + l/10)
-bb = PlanckEmitter()
+bb = Pyrometers.PlanckEmitter()
 i = Pyrometers.fix_temperature(e * bb  , 1200.0)
+l = range(1,2,50)
 N = length(l)
-mwp = Pyrometers.MWPPoint(SVector{N}(i.(l)) , SVector{N}(l) , SVector(0.2 , 0.3 , 0.5 , 1234.6))
-mwp(;emissivity_range = ((0.6 , 0.6 , 0.7) , (0.8 , 0.8 , 0.8)) , temperature_range = (1100.0 , 1300.0))
+poly_type = Pyrometers.ScaledPolynomials.BernsteinSymPoly{3,Float64}
+mwp = Pyrometers.MWPPoint(SVector{N}(i.(l)) , SVector{N}(l) , SVector(0.2 , 0.3 , 0.5) ,   1234.6 , poly_type)
+mwp(;emissivity_range = ((0.2 , 0.2 , 0.2) , (0.8 , 0.99 , 0.99)) , temperature_range = (1100.0 , 1300.0))
 Pyrometers.emissivity(mwp)
+mwp_pyro = Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
+
+@code_warntype Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)

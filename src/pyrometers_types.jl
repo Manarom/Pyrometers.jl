@@ -270,6 +270,4 @@ get_emissivity(p::RatioPyrometer) = (p.ϵ1[] , p.ϵ2[])
 
 extract_pyrometer_inds(p::SpectralBandPyrometer , λ::AbstractVector ) =    extract_subrange_inds(p.λ[1] , p.λ[2] , λ)
 extract_subrange_inds(l1 , l2 , λ) = (searchsortedfirst(λ , l1 ) , searchsortedlast( λ , l2))
-
-
 include("MultiwavelengthPyrometryTypes.jl")

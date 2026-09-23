@@ -92,7 +92,7 @@ Pm1 - P-1 number of parameters approximating
 NxPm1 - N*(P-1) number of vandermatrix elements
 T - type of data
 """
-struct MWPPoint{N , Nx3 ,P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}#{N,P,T} # N - wavelength number, CN - parameters number + 1
+struct MWPPoint{N , Nx3 ,P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T , PolyType}#{N,P,T} # N - wavelength number, CN - parameters number + 1
     # N , Nx3 , P, NxP, PxP, Pm1 , NxCN, CNxCN , T
     # Stores data about the spectral band, BBemission spectrum and experimental measured spectrum
     bb::BBPoint{N,Nx3,T} 
@@ -106,7 +106,7 @@ struct MWPPoint{N , Nx3 ,P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}#{N,P,T} # N - wa
     jacobian::MMatrix{N,P,T,NxP}#LxP # Jacobian matrix
     hessian_approx::MMatrix{P,P,T,PxP} #PxP # approximate hessian matrix
     hessian::MMatrix{P,P,T,PxP} # Hesse matrix
-    vandermonde::VanderMatrix{N, Pm1, T, NxPm1, Pm1xPm1} # Vandermonde matrix type VanderMatrix{N,CN,T,NxCN,CNxCN} - N - rows number, CN - columns of vander number ()
+    vandermonde::VanderMatrix{N, Pm1, T, NxPm1, Pm1xPm1 , PolyType} # Vandermonde matrix type VanderMatrix{N,CN,T,NxCN,CNxCN} - N - rows number, CN - columns of vander number ()
     # internal usage
     x_em_vec::MVector{P,T} # vector of emissivity evaluation values
     x_jac_vec::MVector{P,T} #Px1 # vector of jacobian claculation parameters
@@ -128,11 +128,12 @@ Constructor for band pyrometry fitting,
 """
 function MWPPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
                         λ::StaticArray{Tuple{N},T,1},
-                        initial_x::StaticArray{Tuple{P},T,1};
-                        polynomial_type::Symbol=:bernsteinsym,
-                        I_sur::Union{StaticArray{Tuple{N},T,1},Nothing}=nothing) where {N,P,T}
+                        initial_emissivity::StaticArray{Tuple{Pm1} , T , 1},
+                        initial_temperature::T,
+                        ::Type{PolyType} = BernsteinSymPoly{Pm1,T};
+                        I_sur::Union{StaticArray{Tuple{N},T,1},Nothing}=nothing) where PolyType <: AbstractPoly{Pm1,T} where {N,Pm1,T}
 
-       PolyTypeAbs = haskey(ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES , polynomial_type) ? ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[polynomial_type] : BernsteinSymPoly
+       #PolyTypeAbs = haskey(ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES , polynomial_type) ? ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[polynomial_type] : BernsteinSymPoly
 
        # if entered polynomial type is not supported then it turns to "simple"
        #L = length(λ) #total number of spectral points
@@ -140,10 +141,12 @@ function MWPPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
        #polynomial_degree =  P - 2 #degree of emissivity polynomial approximation
        # polynomial degree goes from 0,1... where 1 is linear approximation
        # {N , Nx3 , P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}
+       initial_x = (initial_emissivity... , initial_temperature)
+       P = Pm1 + 1
        Nx3 = 3*N
        NxP = N*P
        PxP = P*P 
-       Pm1 = P - 1
+       #Pm1 = P - 1
        NxPm1 = N*(P - 1)
        Pm1xPm1 = (P - 1)*(P - 1) 
        
@@ -157,7 +160,10 @@ function MWPPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
        is_has_Iₛᵤᵣ = !isnothing(I_sur) && length(I_sur)==length(λ)
        Isr =  is_has_Iₛᵤᵣ ? SVector{N}(I_sur) : SVector{N}(zeros(T,N))
        # {N , Nx3 , P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}
-       new{N , Nx3 , P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T}(
+       #PolyTypeAbs = get(ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES, polynomial_type, ScaledPolynomials.BernsteinSymPoly)
+       poly = PolyType()
+       #PolyType = PolyTypeAbs{Pm1 ,T}
+       new{N , Nx3 , P, NxP, PxP, Pm1 , NxPm1, Pm1xPm1 , T , PolyType}(
                 BBPoint(measured_Intensity,λ),# filling BB emission obj
                 Px1_T(initial_x), #em_poly
                 Nx1_T(undef), # emissivity
@@ -168,7 +174,7 @@ function MWPPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
                 PxP_T(undef),# approximate hessian
                 PxP_T(undef),# hessian
                 VanderMatrix(SVector{N}(λ), # wavelength
-                            PolyTypeAbs{Pm1,T}()
+                            poly 
                 ),
                 Px1_T(undef), # x_em_vec - emissivity evaluation vector
                 Px1_T(undef), # x_jac_vec - Jacobian evaluation vector
@@ -187,6 +193,44 @@ parnumber(::MWPPoint{N, Nx3, P}) where  {N, Nx3, P} = P
 parnumber(::BBPoint) = 1
 degrees_of_freedom(p::Union{BBPoint,MWPPoint}) = pointsnumber(p) - parnumber(p)
 emissivity(p::MWPPoint) = copy(p.ϵ)
+
+#function emissivity_polynomial(p::MWPPoint{})
+
+function clear_cache!(p::BBPoint{N , M , T}) where {N,M,T}
+
+    protected = (:I_measured, :λ) 
+
+    for field in propertynames(p)
+        field in protected && continue
+        
+        val = getproperty(p, field)
+        if val isa StaticArray
+            val .= zero(T)          # In-place reset for MVectors/MMatrices
+        elseif val isa Base.RefValue
+            val[] = zero(T)         # In-place reset for Refs
+        end
+    end
+    residual!(p , first(DEFAULT_TEMPERATURE_RANGE[]))
+    return p
+    
+end
+const SimplyTypedMW{N,P,T} = MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T} where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
+function clear_cache!(p::SimplyTypedMW{N , P , T}) where {N , P , T}
+    
+    clear_cache!(p.bb)
+
+    protected = (:Iₛᵤᵣ, :is_has_Iₛᵤᵣ ,:vandermonde, :bb) 
+
+    for field in propertynames(p)
+        field in protected && continue
+        
+        val = getproperty(p, field)
+        val .= zero(T) 
+    end
+    @. p.r = p.bb.ri
+    return p
+    
+end
 #emissivity(p::BandPyrometryPoint,λ::AbstractVector) = 
     """
     box_constraints(bp::MWPPoint)
@@ -308,12 +352,12 @@ Input:
         where a1...an - emissivity approximations coefficients, T  - temperature    
     """
     function residual!(bp::MWPPoint , x::AbstractVector)
-        feval!(bp,x)   # feval! calculates function value only if current x is not the same as 
+        feval!(bp , x)   # feval! calculates function value only if current x is not the same as 
         @. bp.r =bp.bb.I_measured - bp.Ic # measured data - calculated 
         bp.bb.r[] = 0.5 * norm(bp.r)^2 # discrepancy value
         return bp.r # returns residual vector
     end
-    
+    #function residual!(p::BBPoint)
     """
     disc(x::AbstractVector,bp::MWPPoint)
 
@@ -521,7 +565,7 @@ function feval!(e::BBPoint , t::Number) # fills planck spectrum
         end
         return e.Ib
     end
-    residual!(e::BBPoint , T::AbstractArray) = residual!(e::BBPoint,T[end])
+    residual!(e::BBPoint , T::AbstractArray) = residual!(e::BBPoint , T[end])
 """
     residual!(e::BBPoint,t::Float64)
 
@@ -708,13 +752,9 @@ function fit_T!(point::Union{BBPoint , MWPPoint},
                         
 end
 
-function (emp::MWPPoint)(I::AbstractVector; optimizer = DefaultOptimizer(), kwargs...) 
+function (emp::Union{MWPPoint , BBPoint})(I::Union{AbstractVector , Number}; kwargs...) 
     set_measured!(emp , I)
-    return fit_T!(emp , optimizer ;  kwargs...)
-end
-function (emp::BBPoint)(I::Union{AbstractVector , Number}; optimizer = DefaultOptimizer(), kwargs...) 
-    copyto!(emp.I_measured , I)
-    return fit_T!(emp ,optimizer ;  kwargs...)
+    return emp(;  kwargs...)
 end
 
 function (emp::Union{BBPoint , MWPPoint})(; optimizer = DefaultOptimizer() , 
@@ -771,10 +811,38 @@ struct MultiWavelengthPyrometer{N , T , MWP} <: AbstractPyrometer{N,T}
         return new{N , T , MWP}(mwp)
     end
 end
-wavelength(p::MultiWavelengthPyrometer) = p.mwp.bb.λ
+MultiWavelengthPyrometer(λ::StaticVector{N , T}  ;  
+                            xₒ::NTuple{P} = (0.5 , 0.5 , 0.5 , 1000.0) , 
+                            i_measured::Union{Nothing , AbstractVector{T} , AbstractSpectralQuantity} = nothing,
+                            polynomial_type = :bernsteinsym , 
+                            I_sur::Union{StaticArray{Tuple{N}, T, 1}, Nothing} = nothing) where {N , P , T <: Number} = begin
+    
+    _i = if isnothing(i_measured) 
+        MVector{N , T}(undef) 
+    elseif isa(i_measured , AbstractVector) 
+        MVector{N , T}(i_measured)
+    elseif isa(i_measured , AbstractSpectralQuantity)
+        MVector{N , T}(i_measured.(λ))
+    end  
+    
+    mwp = MWPPoint( _i, 
+                   MVector{N , T}(λ) , 
+                   MVector{P , T}(xₒ) ; 
+                   polynomial_type = polynomial_type , 
+                   I_sur = I_sur  
+                   )
+    return MultiWavelengthPyrometer(mwp)                            
+end
+MultiWavelengthPyrometer{N}(l::AbstractVector;kwargs...) where N = MultiWavelengthPyrometer(MVector{N}(l); kwargs...) 
+
+(p::MultiWavelengthPyrometer)(;kwargs...) = p.mwp(;kwargs...)
+wavelengths(p::MultiWavelengthPyrometer) = p.mwp.bb.λ
 measured(p::MultiWavelengthPyrometer) = measured(p.mwp)
+
 calculated(p::MultiWavelengthPyrometer) = p.mwp.Ic
 emissivity(p::MultiWavelengthPyrometer) = p.mwp.ϵ
+
+
 measured(p::MWPPoint) = measured(p.bb)
 measured(p::BBPoint) = p.I_measured
 
@@ -841,24 +909,28 @@ end
 
 
 """
-Сверхбыстрый одномерный поиск температуры для BBPoint с жесткими границами.
-Сочетает кубическую скорость метода Халлея и 100% надежность дихотомии.
-"""
-function fit_blackbody_safeguarded!(
+    fit_blackbody_safeguarded!(
     bb::BBPoint{N, Nx3, T_type}, 
     T_start::Real, 
     T_min::Real, 
     T_max::Real
             ) where {N, Nx3, T_type}
 
-    # Зажимаем стартовую точку в границы на всякий случай
-    T_curr = clamp(T_type(T_start), T_type(T_min), T_type(T_max))
+
+ Default solver for BBPoint with bc using Halley method
+"""
+function fit_blackbody_safeguarded!(
+    bb::BBPoint{N, Nx3, T_type}, 
+    T_start::Number, 
+    T_min::Number, 
+    T_max::Number ) where {N, Nx3, T_type}
+
+    (T_min > T_max) && ((T_min , T_max) = (T_max , T_min))
+    a = T_type(T_min)
+    b = T_type(T_max)
+
+    T_curr = clamp(T_type(T_start), a, b)
     
-    # Инициализируем динамические границы поиска
-    a::T_type = T_min
-    b::T_type = T_max
-    
-    # Временные буферы для вызова ваших функций (на стеке)
    # x_vec = MVector{1, T_type}(T_curr)
     max_iter = 30
     tol = T_type(1e-6)
@@ -866,8 +938,7 @@ function fit_blackbody_safeguarded!(
     for iter in 1:max_iter
 
         f_val = grad!(bb , T_curr)  
-        f_prime = hess!(bb, T_curr)         
-        
+        f_prime = hess!(bb, T_curr)                
         if abs(f_val) < tol
             break
         end
