@@ -194,6 +194,14 @@ parnumber(::BBPoint) = 1
 degrees_of_freedom(p::Union{BBPoint,MWPPoint}) = pointsnumber(p) - parnumber(p)
 emissivity(p::MWPPoint) = copy(p.ϵ)
 
+wavelengths(p::BBPoint)  = p.λ
+wavelengths(p::MWPPoint) = wavelengths(p.bb)
+
+function emissivity_poly(p::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T, PolyType}) where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T, PolyType}
+    (xmin , xmax) = extrema(wavelengths(p))
+    return ScaledPolynomial(PolyType(p.x[1:end-1]) , xmin = xmin , xmax = xmax)
+
+end
 #function emissivity_polynomial(p::MWPPoint{})
 
 function clear_cache!(p::BBPoint{N , M , T}) where {N,M,T}
@@ -811,11 +819,17 @@ struct MultiWavelengthPyrometer{N , T , MWP} <: AbstractPyrometer{N,T}
         return new{N , T , MWP}(mwp)
     end
 end
+const POLYNOMIAL_TYPES = (bernstein = BernsteinSymPoly , 
+                            legendre = LegPoly , 
+                            chebyshev = ChebPoly , 
+                            standard = StandPoly  )
+
 MultiWavelengthPyrometer(λ::StaticVector{N , T}  ;  
-                            xₒ::NTuple{P} = (0.5 , 0.5 , 0.5 , 1000.0) , 
+                            starting_emissivity::NTuple{P} = (0.5 , 0.5 , 0.5 ) , 
+                            T_starting::T = 1000.0,
                             i_measured::Union{Nothing , AbstractVector{T} , AbstractSpectralQuantity} = nothing,
-                            polynomial_type = :bernsteinsym , 
-                            I_sur::Union{StaticArray{Tuple{N}, T, 1}, Nothing} = nothing) where {N , P , T <: Number} = begin
+                            polynomial_type::Val{PT} = Val(:bernstein) , 
+                            I_sur::Union{StaticArray{Tuple{N}, T, 1}, Nothing} = nothing) where {N , P , T <: Number , PT} = begin
     
     _i = if isnothing(i_measured) 
         MVector{N , T}(undef) 
@@ -824,11 +838,12 @@ MultiWavelengthPyrometer(λ::StaticVector{N , T}  ;
     elseif isa(i_measured , AbstractSpectralQuantity)
         MVector{N , T}(i_measured.(λ))
     end  
-    
+    PolyType = getfield(POLYNOMIAL_TYPES , PT)
     mwp = MWPPoint( _i, 
                    MVector{N , T}(λ) , 
-                   MVector{P , T}(xₒ) ; 
-                   polynomial_type = polynomial_type , 
+                   MVector{P , T}(starting_emissivity) , 
+                   T_starting , 
+                   PolyType{P , T}; 
                    I_sur = I_sur  
                    )
     return MultiWavelengthPyrometer(mwp)                            
