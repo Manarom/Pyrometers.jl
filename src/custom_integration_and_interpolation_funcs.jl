@@ -1,3 +1,30 @@
+   
+#simple functions for intrepolation and numerical integration 
+
+_local_interpolate(l::NTuple{N} ,  λ_nodes::AbstractVector, ϵ_nodes::AbstractVector) where N = ntuple(N) do i
+        _local_interpolate(l[i] , λ_nodes , ϵ_nodes)
+end
+     """
+    _local_interpolate(λ_target::Number, λ_nodes::AbstractVector, ϵ_nodes::AbstractVector)
+
+Single point interpolation  of discrete data 
+"""
+@inline function _local_interpolate(λ_target::Number, λ_nodes::AbstractVector, ϵ_nodes::AbstractVector)
+       
+        idx = searchsortedfirst(λ_nodes, λ_target)
+        
+        if idx == 1
+            return ϵ_nodes[begin]
+        elseif idx > length(λ_nodes)
+            return ϵ_nodes[end]
+        end
+        
+        λ_start, λ_end = λ_nodes[idx-1], λ_nodes[idx]
+        ϵ_start, ϵ_end = ϵ_nodes[idx-1], ϵ_nodes[idx]
+        
+        t = (λ_target - λ_start) / (λ_end - λ_start)
+        return ϵ_start + t * (ϵ_end - ϵ_start)
+    end
 # internal function for trapz integration 
     """
     _trapz(x::AbstractVector, y::AbstractVector)

@@ -24,9 +24,13 @@ begin
 	Pkg.resolve()
 	using Revise
 	using Pyrometers  , Plots , PlutoUI , PrettyTables , DelimitedFiles , Interpolations 
-	using QuadGK
+	using QuadGK , Pyrometers.StaticArrays
 	src_dir = joinpath(abspath(joinpath(notebook_dir,"..")),"src")
+	using ForwardDiff
 end;
+
+# ╔═╡ 05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
+using BenchmarkTools , Test
 
 # ╔═╡ 30743a02-c643-4bdc-837e-b97299f9520a
 md"""
@@ -54,26 +58,40 @@ The last line will launch the Pluto starting page in your default browser
 # ╔═╡ abdc809b-b53c-4dff-ba6f-c636c73f3fca
 const Planck = Pyrometers.Planck
 
-# ╔═╡ ba23c985-74c4-41f3-8bc4-f7287e30e47f
-#using Revise,StaticArrays,OrderedCollections,Optimization,OptimizationOptimJL,LaTeXStrings,Interpolations,Plots,PlutoUI,DelimitedFiles , ForwardDiff , Roots , QuadGK
-
-# ╔═╡ 9cd8fe6d-dcf9-472e-a019-19b4c1a182ed
-#includet(joinpath(src_dir,"RadiationPyrometers.jl"))
-
-# ╔═╡ 6535717c-99ae-4e8e-94aa-d600f02537ed
-# ╠═╡ disabled = true
-#=╠═╡
- Planck = RadiationPyrometers.Planck
-  ╠═╡ =#
+# ╔═╡ bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
+const MY_GLOBAL_SEGBUF = QuadGK.alloc_segbuf(Float64, Float64, Float64, size=5000);
 
 # ╔═╡ 171409eb-22b5-4bc5-a8e2-eac0932a24f3
 PlutoUI.TableOfContents(indent=true, depth=4, aside=true)
+
+# ╔═╡ 643d9ff3-3a09-46c9-9013-92d111ccb229
+plot_common_args = (grid = true, gridlinewidth=3, gridstyle = :dot,minorgrid=true, box = :on, linewidth = 3);
 
 # ╔═╡ d5ee3913-66be-47d7-a755-699ba64b4f98
 md"""
 ### Introduction
 
-This notebook demonstrates two examples of using the **RadiationPyrometers.jl** package. The purpose of this small package is to create a virtual pyrometer that can be used to calculate the emissivity of a real-life pyrometer, enabling the measured temperature to be adjusted to match the actual temperature of the heated object.  
+This notebook demonstrates examples of using the **Pyrometers.jl** package. 
+
+The purpose of this package is to simulate virtual pyrometers of **five different types**:
+
+* `SpectralBandPyrometer`: A classical pyrometer operating within a fixed wide spectral band.
+* `TwoBandsRatioPyrometer`: A spectral ratio pyrometer that accounts for the finite width of two channels.
+* `SingleWavelengthPyrometer`: A standard pyrometer operating at a single, fixed wavelength.
+* `TwoWavelengthRatioPyrometer`: A classical spectral ratio pyrometer that does not account for the finite width of its spectral channels.
+* `MultiwavelengthPyrometer`: A pyrometer based on least-squares fitting of discrete spectral intensity data across multiple wavelengths (theoretically eliminating the need to know surface emissivity).
+
+All of these pyrometers implement **five core functions**:
+
+* `measure`: Converts input intensity into temperature.
+* `signal`: Converts temperature into a signal (the inverse of `measure`).
+* `convert_temperature`: Transforms one temperature to another (e.g., to account for true surface emissivity).
+* `stray_radiation_corrected_temperature`: Excludes external radiation specified as an intensity.
+* `external_source_corrected_temperature`: Excludes external radiation specified as a source with a given temperature and emissivity.
+
+All these methods are designed to work with simple scalar values (numbers), but they can also account for wavelength- and temperature-dependent surface emissivity, as well as external radiation sources and intensities. 
+
+To handle spectral properties, **Pyrometers.jl** provides a set of types that extend the `AbstractSpectralQuantity` types from the **PlanckFunction.jl** package. It also implements a simple "algebra-on-spectra" approach to perform basic mathematical operations on properties that depend on wavelength and (optionally) temperature.
 
 """
 
@@ -143,19 +161,151 @@ end
 	"""
 end
 
+# ╔═╡ 59b01938-9235-4d39-be4e-e4fdf9f94418
+md""" 
+### II. *Algebra* of spectra
+_______________________
+
+In real life the emissivity is both wavelength and temperature dependent (in general it also depends on direction).  **Pyrometers.jl** provides special types for spectral properties (they all are subtypes of `AbstractSpectralQuanity`): 
+
+"""
+
+# ╔═╡ 6e3f01fb-a0bb-438b-a95a-2c503cc4961e
+Markdown.parse(join(["$(i). $(last(split(string(t), ".")))" for (i, t) in enumerate(subtypes(Pyrometers.AbstractSpectralQuantity))], "\n"))
+
+# ╔═╡ b7117f7b-ad22-4b09-8aa3-3f6a3878c149
+md""" 
+
+**AnalyticalSpectralQuantity** is a wrapper around spectral quantity which has analytical expressions for the quantity itself and its first and second derivatives with respect to temperature:
+
+```julia 
+e_a = AnalyticalSpectralQuantity(f , df , d2f)
+# each of f , df , d2f is a function of two arguments l , t, wavelength and temperature respectively
+e_a(l , t) # returns function value
+eval_Dₜ(e_a , l , t) # returns the tuple of (value , df , d2f)
+```
+
+**IsothermalSpectralQuantity** wrapper for temperature independent quantities:
+
+```julia 
+e_i = IsothermalSpectralQuantity(f ) # f - function of wavelength in μm
+e_i(l)
+e_i(l , t) # returns function value (ignores the second argument)
+eval_Dₜ(e_i , l , t) # returns the tuple of (value , 0.0 , 0.0)
+```
+**GenericDifferentiableSpectralQuantity** is a wrapper around function which can be differentiated by second argument using `ForwadDiff`
+
+"""
+
+# ╔═╡ 5efd8d48-7fff-48fd-b361-2f06cd8bad53
+begin  
+	e_analyt = Pyrometers.AnalyticalSpectralQuantity((l,t)-> 2.0e-4*t + 5e-3*l , 
+													(l,t)-> 2.0e-4 , 
+													(l,t)-> 0.0)
+	e_iso = Pyrometers.IsothermalSpectralQuantity(l-> 2.0e-1 + 1e-3*l)
+	e_dif = Pyrometers.GenericDifferentiableSpectralQuantity((l,t)-> 2.0e-4*t + 5e-3*l)
+end;
+
+# ╔═╡ af619a4d-b700-4996-960c-c9d0e75eac6a
+md"""
+Select quantity to show  $(@bind quant_to_show Select([1=>"f" ,  2=>"df" , 3=> "d2f"]))
+"""
+
+# ╔═╡ 0aad4eb6-e5dc-40e3-82b6-4d64f5b1af4f
+md""" The following figure shows spectra for selected quantities"""
+
+# ╔═╡ e9e16b2b-88d7-40b6-997f-3a40e673faa8
+begin 
+	p_quant = Plots.plot(;plot_common_args...)
+	
+	for t = (1000.0 , 1200.0)
+		l = range(1.0 , 2.0 , 100)
+		for (q , n) in zip((e_analyt , e_iso , e_dif) , ("Analytic" , "Isothermal" , "Differenciable"))
+			f = Base.Fix1(Pyrometers.Planck.eval_Dₜ , q)
+			o = [ f(l_i , t)[quant_to_show] for l_i in l]   
+			plot!(p_quant , l ,o;plot_common_args... , label = n*": T = $t")
+		end	
+	end
+	p_quant
+end
+
+# ╔═╡ 63d5b5bb-5e7d-4e83-83ae-3972f2465e28
+md"""
+**PlanckEmitter** is a Blackbody source wrapped into `AbstractSpectralQuanity` subtype
+
+```julia 
+bb_source = PlanckEmitter()
+bb_source(l , T) # returns spectral intensity for bb source with temperature t at wavelength l
+```
+"""
+
+# ╔═╡ 95baff6c-2af3-401d-9db3-d6e6e31ab70a
+md""" Other quantities are used to implement simple algebra, by wrapping two `AbstractSpectralQuantities` into a single object ,  mathematical operators `*` , `/` , `+` when applied on two `AbstractSpectralQuantity` objects or any `Number` and `AbstractSpectralQuantity` combination return the object of **SpectralQuantitiesProduct** , **SpectralQuantitiesRatio** , **SpectralQuantitiesSum** respectively 
+
+```julia
+
+bb = PlanckEmitter()
+ϵ = GenericDifferentiableSpectralQuantity((l,t)-> 2.0e-4*t + 5e-3*l)
+
+i = ϵ * bb # returns SpectralQuantitiesProduct
+i(l , t) # returns ϵ(l , t) * bb(l , t)
+eval_Dₜ(i, l , t) # returns ϵ(l , t) * bb(l , t) values and first and second derivatives 
+```
+
+`AbstractSpectralQuantity`'s can also be combined with numbers:
+
+```julia
+
+e_new = 1 - 2 * ϵ # returns callable spectral quantity
+
+```
+
+This algebraic constructions can be usefull together with PlanckEmitter by imitating real surfaces emission , e.g.:
+
+```julia
+bb = PlanckEmitter()
+e1 = GenericDifferentiableSpectralQuantity(f) # here f is any autodifferenciable function 
+e2 = GenericDifferentiableSpectralQuantity(f2) # here f2 is any autodifferenciable function 
+i = bb * (e1*e2)/(e1 + e2) # returns an object of `AbstractSpectralQuantity` subtype 
+```
+
+"""
+
+# ╔═╡ 27203e6b-9283-4da3-beb2-9f671100860f
+md" Adjust temperature $(@bind _t Slider(200:1:1700 , show_value = true , default = 1000))"
+
+# ╔═╡ 5010ec7e-b83c-47c6-8c84-17bbcb8e40a1
+begin 
+	bb_source = PlanckEmitter()
+	e_test  = GenericDifferentiableSpectralQuantity((l,t)-> 1.0e-4*t + 5e-3*l)
+	i_combined =  2*(1 - e_test)*bb_source
+	p_combined = Plots.plot(;plot_common_args...)
+	
+	for t = (_t  , )
+		l = range(0.5 , 5.0 , 100)
+		f = Base.Fix1(Pyrometers.Planck.eval_Dₜ , i_combined)
+		v = [ f(l_i , t)[1] for l_i in l]   
+		dv = [ f(l_i , t)[2] for l_i in l]  
+		d2v = [ f(l_i , t)[3] for l_i in l]  
+		plot!(p_combined , l , v;plot_common_args...  , label = "i")
+		plot!(p_combined , l , dv;plot_common_args...  , label = "didt")
+		plot!(p_combined , l , d2v;plot_common_args...  , label = "d2idt2", yscale = :log10)
+	end
+	p_combined 
+end
+
 # ╔═╡ 8a066ee5-80e9-462f-9a61-15851468aa63
 md"""
-### II. Partial radiation pyrometry
+### III. Partial radiation pyrometry
 _______________________
 
 As far as the `blackbody` thermal radiation energy strongly depends on temperature, this quantity can be used to measure the temperature of a real surface. This is the general idea of partial radiation pyrometry: **measure intensity to get the temperature**. As far as the intensity is a directional quantity, a pyrometer needs collimating optics (a telescope).The real surfaces emissivity often varies sufficiently with the wavelength, at the same time, partial radiation pyrometers assume constant emissivity (so-called `grey`-band approximation). Thus, for industrial purposes, it is useful to have several pyrometers, each working within a relatively narrow spectral band. In the spectral range of a partial radiation pyrometer, emissivity should not vary significantly to make the assumption of constant emissivity relevant.
 
-The  [RadiationPyrometers.jl](https://manarom.github.io/RadiationPyrometers.jl) package provides several function to work with `virtual` partial radiation pyrometers.
 """
 
 # ╔═╡ b7fac177-c211-4635-992f-e6473be7bdae
 md"""
-Dictionary **RadiationPyrometers.DefaultPyrometersTypes** contains default pyrometers type names together with spectral range. Custom pyrometer can be created by providing its type (name), wavelength or wavelentgh range, working emissivity: 
+Dictionary **Pyrometers.DefaultPyrometersTypes** contains default pyrometers type names together with spectral range. Custom pyrometer can be created by providing its type (name), wavelength or wavelentgh range, working emissivity: 
 ``` julia
 # creating custom pyrometer objects
 p_custom = RadiationPyrometers.Pyrometer(type = "Custom",λ = [2.5, 3.7],ϵ=0.65)
@@ -168,11 +318,26 @@ pretty_table(HTML,Pyrometers.DefaultPyrometersTypes,top_left_string ="Table of d
 
 # ╔═╡ 02eee968-ff43-4b82-8d68-efede1a220dd
 md"""
-After creating the **Pyrometer** object, it can be used to "measure" the temperature viz convert the intensity of a real surface to its temperature, according to the pyrometer's spectral range using **RadiationPyrometers.measure(pyr,measured_intensity)** function (the intensity should be provided in correct units [W/m²⋅sr⋅μm]). It is quite in practice to know the real temperature of the surface at some point, in this case the emissivity of virtual pyrometer can be adjusted to make the "measured" temperature be equal to the real one. This can be done using 
+After creating the **Pyrometer** object, it can be used to "measure" the temperature from signal, according to the pyrometer's spectral range using **Pyrometers.measure(pyr,measured_intensity)** function (the intensity should be provided in correct units [W/m²⋅sr⋅μm]) or by calling pyrometer directly (all pyrometers are functors). 
+
 ```julia
-	RadiationPyrometers.fit_ϵ!(p::Pyrometer,Tmeasured::Float64,Treal::Float64) 
+	p = SpectralBandPyrometer(2.0 , 3.0)
+	i = fix_temperature(PlanckEmitter() , 1234.6)
+	p(i) #returns  1234.6
 ```
+
+"""
+
+# ╔═╡ e9d0e216-07b5-4e41-925a-0c530e6ddf7b
+md"""
+ In practice it is quite common situation when one needs to find the emissivity in pyrometer range from real temperature of the surface at some point and temperature measured by the pyrometer, in this case the emissivity of virtual pyrometer can be adjusted to make the "measured" temperature be equal to the real one. This can be done using.
+
+```julia
+	Pyrometers.fit_ϵ!(p::Pyrometer,Tmeasured::Float64,Treal::Float64) 
+```
+
 This function adjusts the emissivity of pyrometer object.
+
 """
 
 # ╔═╡ 9b08b767-7e8f-4483-9f2f-226022ce10e4
@@ -196,7 +361,7 @@ For this particular material the type -`F` pyrometer readings are closer to the 
 
 # ╔═╡ d08ec8f2-7689-4043-9f28-da06ab0124b9
 md"""
-### III. Blackbody reference source emissivity
+### IV. Blackbody reference source emissivity
 _______________________
 
 A real-life pyrometer does not directly measure radiation intensity due to the spectral dependence of its sensitivity and various other factors; therefore, it requires calibration. To calibrate the pyrometer, it is placed in front of a reference source that closely approximates blackbody thermal emission. Typically, this blackbody reference is a specially designed furnace with a heated cavity and a precise temperature controller.
@@ -215,7 +380,7 @@ The following figure shows the spectral emissivity of the blackbody reference, c
 
 # ╔═╡ 72947d97-0a97-4064-a2fe-08d19dec0f0e
 md"""
- ### IV Two temperature emission
+ ### V Two temperature emission
 """
 
 # ╔═╡ 9ce196c1-8915-46da-9aba-f13d7655959a
@@ -224,7 +389,7 @@ md"""
 
 ``I_{meas} = \epsilon\mathcal{b}(\lambda , T_1) + (1 - \epsilon)\mathcal{b}(\lambda , T_2)``
 
-Check is it is possible to measure the surface temperature in a presence of external emission with much higher temperature
+Let's check if it is possible to measure the surface temperature in a presence of external emission with a much higher temperature
 """
 
 # ╔═╡ 3581aa29-714b-422a-8feb-d1a0c3ebeec7
@@ -404,21 +569,16 @@ md" Sample emissivity , ϵ = $(@bind ϵ_fixed  Slider(1e-4:1e-4:1.0 , show_value
 # ╔═╡ efc35420-d0e6-4795-94b6-d43289b4de44
 begin 
 	if emissivity_type == "fixed"
-		ϵ = ϵ_fixed
 		eint = Returns(ϵ_fixed)
 	else
 		_data = readdlm(joinpath(data_folder , emissivity_type))
-		if contains(emissivity_type , "quarz")
+		#=if contains(emissivity_type , "quarz")
 			@. _data[:,2] = 1.0 - _data[:,2]
-		end
-		eint = linear_interpolation(_data[:,1] , _data[:,2] , extrapolation_bc=Line())
-		ϵ = eint.(λ2)
-		 
+		end=#
+		eint = @views linear_interpolation(_data[:,1] , _data[:,2] , extrapolation_bc=Line())
 	end
+	e_int_iso = Pyrometers.IsothermalSpectralQuantity(eint)
 end;
-
-# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
-md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
 
 # ╔═╡ 91bbd553-4e4a-431d-9d54-b0f4882fd426
 md"""
@@ -438,7 +598,7 @@ md" Show wavelength range: $(@bind λ_show RangeSlider(range(extrema(λ2)... , 1
 pyrometers_vector2 = deepcopy(pyrometers_vector);
 
 # ╔═╡ 54339700-71fd-48bf-a2ef-0c3267b9d81b
-md" ### Recalculate T matrix $(@bind is_recalculate CheckBox(false))"
+md" **Recalculate T matrix $(@bind is_recalculate CheckBox(false))**"
 
 # ╔═╡ 7f76bc22-77c3-4eb3-9d49-588e653df2e7
 md"""
@@ -457,23 +617,12 @@ md"""
 	
 Custom pyrometer wavelength range:
 
-λleft = $(Child("left", NumberField(0.1:1e-3:20 , default = 7.2)))
+λleft = $(Child("left", NumberField(0.1:1e-3:20 , default = 8.0)))
 
-λright = $(Child("right", NumberField(0.1:1e-3:20 , default = 7.3)))
+λright = $(Child("right", NumberField(0.1:1e-3:20 , default = 9.7)))
 
 """
 end
-
-# ╔═╡ 969907ad-0c38-4dfb-8e2d-ac25619fbe5f
-custom_waves
-
-# ╔═╡ 5b647454-e5fc-4c65-8a0a-8eb499955cc1
-if is_recalculate && use_custom
-	p_custom = Pyrometers.Pyrometer([custom_waves...],type = :C  , ϵ = 1.0)
-end
-
-# ╔═╡ c9634225-fa52-4747-8f45-3511141bd164
-md" #### Try plotly! : $(@bind is_use_plotly CheckBox(false))"
 
 # ╔═╡ e480137d-b6d9-4e18-92f0-640292bbb5f0
 function two_planck(l , ϵ , T1 , T2)
@@ -482,10 +631,14 @@ end
 
 # ╔═╡ 6342e92b-4434-4e4b-aa2f-56405277caed
 begin 
+	ϵ  = e_int_iso.(λ2)
 	I1 = @. ϵ * Planck.ibb.(λ2 , T1)
 	I2 = @. (1.0 - ϵ) * Planck.ibb.(λ2 , T2)
 	I_measured =@. two_planck.(λ2 , ϵ , T1 , T2)
 end;
+
+# ╔═╡ a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
+md""" Cristiansen wavelength: ϵ =$(ϵ[argmax(ϵ)]) at $(λ_max = λ2[argmax(ϵ)]) μm"""
 
 # ╔═╡ 459f54a1-bbf0-4268-8bec-8142d436976a
 begin 
@@ -566,64 +719,15 @@ end;
 # ╔═╡ 48b184a0-b1df-461e-a3f5-3c8be72ab875
 md" Select pyrometer type: $(@bind selected_type Select(kvect , default = pyr_smaller_type) )"
 
-# ╔═╡ 10298d52-d411-475f-b7f6-8562ed2a25bc
-if is_recalculate 
-	
-	T1_scan = 273.0:50:1373
-	T2_scan = 1273.0:50:3800
-
-
-	if use_custom
-		p_selected = p_custom
-	else
-		p_selected = filter(p->p.type == selected_type , pyrometers_vector2)[]
-	end
-	
-	_is2 = Pyrometers.is_spectral_band(p_selected)
-		# 
-	l = _is2 ? p_selected.λ : [p_selected.λ[]-0.2,p_selected.λ[]+0.2 ]
-	
-	_λ_pyr_interp = _is2 ? collect(range(l...,length=30)) : p_selected.λ
-
-	e_s = eint.(_λ_pyr_interp)
-	e_avg = Pyrometers.integral_emissivity(p_selected , eint , 1273.15)
-	
-	#e_avg = sum(e_s)/length(e_s)
-
-	# setting averaged value of emissivity to pyrometer
-	Pyrometers.set_emissivity!(p_selected, e_avg)
-	
-	# calculating the measured by the pyrometer value 
-	
-	_N = length(T1_scan)
-	_M = length(T2_scan)
-	
-	ΔT_mat = zeros((_M , _N))
-	Tmeas_mat = zeros((_M , _N))
-	
-	 	for j in 1 : _N
-		for i in 1 : _M
-			t1 =  T1_scan[j]
-			t2 = T2_scan[i]
-			i_measured_selected = two_planck.(_λ_pyr_interp , e_s , t1, t2)
-			
-			i_measured_int =  _is2 ? quadgk(l-> two_planck(l , eint(l) , t1, t2) , p_selected.λ[1] , p_selected.λ[2] )[1] : i_measured_selected[]
-
-			t_meas = try 
-					p_selected(i_measured_int)
-				catch 
-					0.0
-			end
-			
-			ΔT_mat[i , j] = (t_meas - t1)/t1
-			Tmeas_mat[i , j] = t_meas
-		end
-	end
-	
+# ╔═╡ 98cfdb54-7338-401f-8dcb-fd7752a70e0e
+if use_custom
+	p_selected =  Pyrometers.Pyrometer([custom_waves...], type = :C  , ϵ = 1.0)
+else
+	p_selected = Pyrometers.Pyrometer(selected_type)
 end
 
-# ╔═╡ fe1b4c33-1be4-46ab-ba70-b58504e169a6
-dfff = quadgk(l-> two_planck(l , eint(l) , 1573 , 1873) , p_selected.λ[1] , p_selected.λ[2])[1]
+# ╔═╡ 1ecac1b1-8efb-47d6-9e0a-093487e0c880
+p_selected(fix_temperature(PlanckEmitter() , 1234.6))
 
 # ╔═╡ baeafd9c-19bc-4dda-ade2-89b8cf534f88
  begin 
@@ -632,50 +736,94 @@ dfff = quadgk(l-> two_planck(l , eint(l) , 1573 , 1873) , p_selected.λ[1] , p_s
       i = isurface + reflected
  end
 
-# ╔═╡ b82e1650-ff56-45b1-baa1-ebf534400d73
-Pyrometers.integral_emissivity(p_selected , eint , 1573.15)
+# ╔═╡ 1c02bee4-29af-4a5f-8b83-0ee6d5e226be
+begin 
+	struct MixedRadiationEmitter{E , R , PL1 , PL2}
+		e::E
+		r::R
+		pl1::PL1
+		pl2::PL2
+		function MixedRadiationEmitter(e)
+			r = Pyrometers.SpectralReflectivity(e)
+			pl1 = e * Pyrometers.PlanckEmitter()
+			pl2 = r * Pyrometers.PlanckEmitter()
+			new{typeof(e) , typeof(r) , typeof(pl1) , typeof(pl2)}(e , r , pl1 , pl2)
+		end
+	end
+	(em::MixedRadiationEmitter)(l , t1 , t2) = em.pl1(l , t1) + em.pl2.(l , t2)
+	function fix_second_temperature(me::MixedRadiationEmitter , t)
+		me.pl1 + Pyrometers.fix_temperature(me.pl2 , t)
+	end
+end
 
-# ╔═╡ cf6322f0-0802-4261-b78f-a0f97a8ae2ad
-Pyrometers.set_emissivity!(p_selected , Pyrometers.integral_emissivity(p_selected , eint , 1500.0))
+# ╔═╡ abf9e80e-49e9-4a35-bc68-bb6c4260fa94
+begin 
+	em1 = MixedRadiationEmitter(e_int_iso)
+	em1(2.3 , 1300 , 1800)
+	a = fix_second_temperature(em1 , 1800)
+	T_measured = p_selected( a , 1200.0 ,  e_int_iso ) # 1200 is the true temperature 
+	incident_radiation = Pyrometers.PlanckEmitter()
+	Pyrometers.external_source_corrected_temperature(p_selected , T_measured , e_int_iso , 1800.0 , 1.0 , Pyrometers.EnclosureGeometry())
+end
 
-# ╔═╡ 7450bf72-3a21-4322-995b-36e16e62fd18
-T_measured = p_selected(i)
+# ╔═╡ 5e64a74b-fe14-4461-871b-6b609b5e83cd
+plot(λ_show , em1.(λ_show , 300 , 2800))
 
-# ╔═╡ 43576cb6-87d6-4bcc-90bd-a7ab754e1245
-Pyrometers.corrected_temperature(p_selected ,  T_measured , 1873 , 1.0)
+# ╔═╡ ba559d2d-3bd0-4cd1-8836-8ab0b860c3a5
+Pyrometers.integrate(p_selected.λ[1] , p_selected.λ[2]  ,1200.0 ,  a )
 
-# ╔═╡ ca361b35-22b3-4c8f-a1c2-ca5ffc594eff
-p_selected
+# ╔═╡ 4f6c8a96-2347-496a-8d71-1d410fa30ac9
+function evaluate_temperature_error(p , e)
+	
+	T_surf_scan = range(273,1773 , 25)
+	T_heater_scan = range(1673, 2973 , 25)
+
+	em_stray_rad = MixedRadiationEmitter(e)
+
+	
+	_N = length(T_surf_scan)
+	_M = length(T_heater_scan)
+	
+	ΔT_mat = zeros((_M , _N))
+	Tmeas_mat = zeros((_M , _N))
+	exclution_error = zeros((_M , _N))
+	
+	 	for i in 1 : _M
+		 t2 = T_heater_scan[i]
+		 _a = fix_second_temperature(em_stray_rad , t2) # fixing source temperature returns SpectralQuantity
+		Threads.@threads for j in 1 : _N
+			t1 =  T_surf_scan[j]
+			t_meas =  p( _a , t1 ,  e )
+			ΔT_mat[i , j] = (t_meas - t1)/t1
+			Tmeas_mat[i , j] = t_meas
+			t_stray_excluded = Pyrometers.stray_radiation_corrected_temperature(p , t_meas , e , t2 , 1.0)
+			exclution_error[i , j] = (t_stray_excluded - t1)/t1
+		end
+	end
+	return (T_surf_scan, T_heater_scan  , ΔT_mat ,Tmeas_mat ,  exclution_error)
+end
+
+
+
+
+# ╔═╡ 10298d52-d411-475f-b7f6-8562ed2a25bc
+if is_recalculate 
+
+	(T_surf_scan, T_heater_scan , ΔT_mat ,Tmeas_mat ,  exclution_error)  = evaluate_temperature_error(p_selected , e_int_iso)
+	
+end
 
 # ╔═╡ 0cb50b02-ab41-416c-8610-c3ff318b117b
 if is_recalculate 
-	if is_use_plotly
-		tr2 = PlutoPlotly.surface(x = T2_scan , y = T1_scan, z=100.0 * ΔT_mat, colorscale="Viridis")
-		
-		layout2 = Layout(
-    		width=800, 
-    		height=600, 
-    		autosize=true,
-    		margin=attr(l=0, r=0, b=0, t=50),  # Minimize margins
-    		scene=attr(
-        		yaxis_title="T образца",
-            	xaxis_title="T лампы", 
-            	zaxis_title="100%*ΔT/T1"
-
-    		)
-		)
-		p_res = PlutoPlotly.plot(tr2 , layout2)
-	else
-		p_res = Plots.surface(T1_scan, T2_scan , 100.0*ΔT_mat )
-	end
+	p_res = Plots.surface(T_surf_scan, T_heater_scan , 100.0*ΔT_mat )
 end
 
 # ╔═╡ 3e19d251-91f6-4383-bfc8-ffe816570f42
 if is_recalculate
 	md"""
-	Tsurface = $(@bind T_surf_selected Select(T1_scan))
+	Tsurface = $(@bind T_surf_selected Select(T_surf_scan))
 	
-	Tlamp = $(@bind T_lamp_selected Select(T2_scan))
+	Tlamp = $(@bind T_lamp_selected Select(T_heater_scan))
 	
 	"""
 end	
@@ -683,49 +831,278 @@ end
 # ╔═╡ ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 if is_recalculate
 
-	j_selected = findfirst(t->t == T_surf_selected , T1_scan)
-	i_selected = findfirst(t->t == T_lamp_selected , T2_scan)
-	md" Tmeas ± ΔT = $( Tmeas_mat[i_selected , j_selected] ) ± $(ΔT_mat[i_selected , j_selected] *  T1_scan[j_selected] )"
+	j_selected = findfirst(t->t == T_surf_selected , T_surf_scan)
+	i_selected = findfirst(t->t == T_lamp_selected , T_heater_scan)
+	md" Tmeas ± ΔT = $( Tmeas_mat[i_selected , j_selected] ) ± $(ΔT_mat[i_selected , j_selected] *  T_surf_scan[j_selected] )"
 end
 
 # ╔═╡ dd1561e2-233f-425a-832f-130b49f0bf0b
 if is_recalculate
-	out_table = vcat(hcat([0.0] , transpose(T1_scan)) , hcat(T2_scan, 100*ΔT_mat))
+	out_table = vcat(hcat([0.0] , transpose(T_surf_scan)) , hcat(T_heater_scan, 100*ΔT_mat))
 	pretty_table(HTML , out_table)
 end
 
 # ╔═╡ 05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 if is_recalculate
-	out_table_T = vcat(hcat([0.0] , transpose(T1_scan)) , hcat(T2_scan, Tmeas_mat))
+	out_table_T = vcat(hcat([0.0] , transpose(T_surf_scan)) , hcat(T_heater_scan, Tmeas_mat))
 	pretty_table(HTML , out_table_T )
 end
 
+# ╔═╡ 805cd62e-a188-4e3f-a870-990530cbc7db
+SP = Pyrometers.ScaledPolynomials
+
+# ╔═╡ 5a56e1db-5909-443f-8f8f-e8a640b9bd3e
+md"""
+	### VI. Multiwavelength pyrometry
+	_______________________
+
+	Unlike classical partial radiation pyrometry, which requires setting a constant emissivity in some relatively narrow wavelength region, the **multiwavelength pyrometry**  in theory, allows one to obtain the temperature of a surface without knowing the emissivity. More about multiwavelength pyrometry can be found e.g. in [Multi-spectral pyrometry—a review](https://iopscience.iop.org/article/10.1088/1361-6501/aa7b4b). 
+
+	In order to achieve this goal, the **multiwavelength pyrometry** assumes that the dependence of emissivity on wavelength in some spectral range can be described by some relatively small number (``N``) of parameters. Hence, if you have measured thermal radiation intensity at relatively large number (``M``) of wavelengths, and if ``M>N+1``, you can formulate the optimization problem in space of ``N+1`` optimization variables viz ``\vec{x}= \begin{bmatrix} a_0 , \dots,  a_{N-1} , T\end{bmatrix}``, here `` \begin{bmatrix} a_0 , \dots,  a_{N-1}  \end{bmatrix}`` are ``N``  emissivity approximation coefficients, and the ``(N+1)``'th optimization variable ``T`` is the temperature.	The **multiwavelength pyrometry** optimization problem has several features that can be utilized in order to obtain a computationally-effective algorithm:
+
+	* First, the emissivity approximation is a linear problem, this means that emissivity approximation coefficients can be taken independent of both the optimization variables and the independent variables (wavelength)
+	* Second, a highly non-linear term (viz Planck function) depends on only one of the optimizaiton variables
+	* And third, the target function is the product of linear and non-linear optimization problems
+
+	Mathematical consequencies of these features are described in this repository supplementary materials [download pdf](https://manarom.github.io/BandPyrometry.jl/assets/supplementary_v_0_0_1.pdf) in more details.
+
+	In `Pyrometers.jl` , the real surface thermal emission is approximated as a product of Planck function (ideal surface thermal emission) and linear (with respect to the optimization variables e.g. polynomial coefficients) approximation of spectral emissivity.	
+
+	In `Pyrometers.jl` the spectral emissivity is approximated as a linear combination of basis functions:
+	"""
+
+# ╔═╡ 253847d7-87fa-461d-8361-fac6c6facf73
+md"""
+``\epsilon(λ)=\sum_{n=0}^{N-1}a_n \cdot \phi_n(λ)``
+
+where ``\phi_n`` is the basis function column vector, e.g. for standard basis it is:
+
+``\mathbf{ \phi_n(λ)  = \begin{bmatrix} λ₁ⁿ  \\ \vdots \\ λ_{M}ⁿ \end{bmatrix}
+}``
+
+Full emission spectrum of a real surface is calculated as:
+
+``\mathbf{ 
+I_{real\:surface} (\lambda,T) =I_{blackbody}(\lambda,T) \cdot  \epsilon(λ)=I_{blackbody}(\lambda,T) \cdot \sum_{n=0}^{N-1}a_n \cdot \phi_n(λ)
+} ``
+
+Now, the optimization problem can be formulated:
+
+``\vec{x}^*=argmin\{F(\vec{x})\}`` 
+
+``F(\vec{x})=\sum_{i=1}^{M}[y_i - I_{blackbody}(\lambda_i,T) \cdot (\sum_{n=0}^{N-1}a_n \cdot \phi_n(λ_i))]^2`` 
+
+``\vec{x} = [\vec{a},T]^t``
+
+where ``\vec{a}`` is the column vector of emissivity approximation (  ``[]^t`` stays for transposition), ``\vec{x}^*`` is the local minimum
+
+To solve this optimization problem `BandPyrometry.jl` package provides functions to evaluate the discrepancy function ``F``, ``\nabla F`` and ``\nabla^2F`` which are needed to solve the optimization problem using zero, first or second order optimization algorithms. It also has special type to work with the emissivity linear approximation.
+
+"""
+
+# ╔═╡ 86b4b811-7c70-49a5-92f2-4ba409a0ef32
+md"""
+
+####  Emissivity approximation functions
+_______________________
+
+To approximate the emissivity `Pyrometers.jl`  uses several polynomial bases:
+(from [`ScaledPolynomials.jl`](https://https://github.com/Manarom/ScaledPolynomials.jl) package)
+* Standard  
+* Chebyshev  
+* Legendre 
+* Trigonometric basis: ``\phi_n(λ) = sin(\pi \cdot n \lambda)``  for odd n, and  ``\phi_n(λ) = cos(\pi \cdot n \lambda)`` for even n
+* Bernstein basis of degree ``D``: ``\phi_{k}^{n}(\lambda) = (\begin{matrix} n \\ k \end{matrix}) (\frac {\lambda - a}{b - a})^k(\frac {b-\lambda}{b-a})^{n-k}`` - Bernstein basis function for ``\lambda \in [\lambda_a...\lambda_b]`` , ``k \in [0...n]`` , ``a = -1``, ``b = 1``
+
+All basis vectors are stored in a structure called `VanderMatrix`, this type: 
+
+1. Stores basis vectors for selected polynomial type and degreee  - columns of matrix ``V``: ``V= \begin{bmatrix} \vec{\phi_1} , \dots,  \vec{\phi_n} \end{bmatrix}``
+
+2. The resulting emissivity can be calculated as a product of `VanderMatrix` and the vector of emissivity approximation polynomial coefficients vector: ``\vec{\epsilon}=V\cdot\vec{a}``
+
+"""
+
+# ╔═╡ 4894c2ab-4db5-4b7c-9c4a-9dd1c5345c28
+@bind  λ_fit_vand PlutoUI.combine() do Child
+	md"""
+	Emissivity fitting spectral range, ``\mu m`` : \
+	``\lambda_{left}`` = $(
+		Child(Slider(0.1:0.1:16,default=4.0,show_value = true))
+	)   -- 
+	 $(
+		Child(Slider(0.1:0.1:16,default=8.0,show_value = true))
+	)  ``\lambda_{right}`` 
+	"""
+end
+
+# ╔═╡ c2582621-54fb-44b1-a3ea-4cfacb6062ff
+md"Select polynomial basis type $(@bind em_approx_poly_type Select(collect(keys(Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES)),default = :bernsteinsym))"
+
+# ╔═╡ c7554489-1d97-4b9a-a3e9-4be84c82b552
+md"Set polynomial degree : $(@bind poly_fit_degree Select(0:10,default=3)) (the polynomial degree = numer of basis functions - 1, thus, zero order polynomial is an all-units vector)"
+
+# ╔═╡ 5815a317-233a-493a-a8be-03dc7d608c0e
+begin 
+	N1 = 25
+	λ_fit_vec = collect(range(λ_fit_vand...,length=N1)) 
+	
+	interpolated_values =rt_emissivity_interpolation(λ_fit_vec) # interpolating data at λ points
+	PolyType = Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[em_approx_poly_type]{poly_fit_degree + 1 , Float64}
+	Vander_test = Pyrometers.ScaledPolynomials.VanderMatrix(SVector{N1}(λ_fit_vec),PolyType()) # creating new matrix 
+	(a_fit_check,fitted_value,goodness_of_fit) = Pyrometers.ScaledPolynomials.polyfit(Vander_test,λ_fit_vec,interpolated_values)# fitting polynomial coefficients
+	plot(rt_emissivity_data[:,1],rt_emissivity_data[:,2],label = "ϵ real")
+	scatter!(λ_fit_vec,fitted_value, label="ϵ fitted"; plot_common_args...)
+	xlabel!("Wavelength, μm")
+	ylabel!("Emissivity")
+end
+
+# ╔═╡ 77b352db-6734-4501-b9d3-f63ff2adbaf7
+pretty_table(HTML,hcat(["a$(i)" for i in 0:1:poly_fit_degree],a_fit_check), top_left_string="Table of the coefficients of emissivity linear approximation in the band from $(λ_fit_vand[1]) to $(λ_fit_vand[2]) μm using $(em_approx_poly_type) bases type,  the goodness of fit = $(goodness_of_fit)"  , column_labels = ["coeff","val"])
+
+# ╔═╡ bf58aa17-dc84-4bee-94d3-25895b12f553
+md"Measured spectrum fitting region:"
+
+# ╔═╡ c8647683-a25e-4c04-bae0-52a5f40233e9
+md"Select the polynomial type = $(@bind poly_type confirm(Select(collect(keys(Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES)),default = :bernsteinsym)))"
+
+# ╔═╡ 7957b928-29db-4342-9993-15b63023883b
+md"Set polynomial degree : $(@bind real_poly_degree confirm(Select(0:6,default=3))) (the polynomial degree= numer of basis functions-1, thus zero order polynomial is constant)"
+
+# ╔═╡ 3b01166a-451e-4e15-ae34-7049703331f2
+md"""
+The following two figures show:
+
+1)basis vectors for selected polynomial (columns of `VanderMatrix.v`): ``V``
+
+2)the resulting emissivity, calculated as a product of `VanderMatrix` and the vector of emissivity approximation polynomial: ``\vec{\epsilon}= \begin{bmatrix} \vec{\phi_1} , \dots,  \vec{\phi_n} \end{bmatrix}\cdot\vec{a} = V\cdot\vec{a}``
+
+"""
+
+# ╔═╡ 47214b96-bdbc-4ff1-b6cb-2ef0c869b08b
+λ = MVector{50}(range(λ_fit_vand[1] , λ_fit_vand[2] , 50))
+
+# ╔═╡ 6a386feb-48a9-40ac-8fac-be492183ed2b
+@bind  a_real PlutoUI.combine() do Child
+	md"""
+	a0 = $(
+		Child(Slider(-1:0.01:1,default=0.6,show_value = true))
+	) \
+	a1 = $(
+		Child(Slider(-1:0.01:1,default=0.8,show_value = true))
+	)\
+	a2 = $(
+		Child(Slider(-1:0.01:1,default=0.8,show_value = true))
+	)\
+	a3 = $(
+		Child(Slider(-1:0.01:1,default=0.8,show_value = true))
+	)\
+	a4 = $(
+		Child(Slider(-1:0.01:1,default=0.8,show_value = true))
+	)\
+	a5 = $(
+		Child(Slider(-1:0.01:1,default=0.8,show_value = true))
+	)\
+	"""
+end
+
+# ╔═╡ 10c7b1f0-3565-456d-a4bf-84aff0aca60b
+poly_obj = Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[poly_type](a_real)
+
+# ╔═╡ c785b041-9ecb-484c-a25b-5de976bd9184
+scaled_poly = SP.ScaledPolynomial(poly_obj , xmin = λ_fit_vand[1] , xmax =λ_fit_vand[2])
+
+# ╔═╡ c0f25834-2bc2-4c65-aefa-466d8017d461
+begin 
+	p_em = plot(λ, scaled_poly.(λ),label=nothing,linewidth=6; plot_common_args...)
+	title!(raw"""Generated "real" surface spectral emissivity""")
+    xlabel!("Wavelength, μm")
+	ylabel!("ϵ")
+	p_em
+end
+
+# ╔═╡ 505b9422-0ba8-46ba-87ed-ca8ccf31fee1
+multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ)}(λ)
+
+# ╔═╡ bd668cb9-991f-4d0b-aebb-ada6cf00998d
+e_surf = IsothermalSpectralQuantity(scaled_poly)
+
+# ╔═╡ 6ed7f722-5980-4d48-9d6b-f8fbfe56cd9f
+bb = PlanckEmitter()
+
+# ╔═╡ a9b55a2b-1a84-4b74-ad90-13cfc87ad773
+i_measured = Pyrometers.fix_temperature(e_surf * bb , 1234.6)
+
+# ╔═╡ a4a9f724-3a0b-4351-af90-778932ee2b1f
+multiwavelength_pyro(i_measured)
+
+# ╔═╡ 1d53599d-9b03-4530-9bf3-2f2c20fd9615
+begin 
+	t1 = SVector(Tuple( vcat(a_real..., 20)))
+	t2 = SVector(Tuple( vcat(a_real... , 3000.0)))
+end
+
+# ╔═╡ ebde5455-47f4-4d9e-ba3e-11656c4dc3b5
+e_fitted = emissivity_poly(multiwavelength_pyro)
+
+# ╔═╡ a5f30290-343d-4a3a-ad85-589fbe8ed570
+begin 
+	plot(λ , e_surf.(λ) , label = "true")
+	plot!(λ , e_fitted.(λ) , label = "fitted")
+end
+
+# ╔═╡ da013910-4176-4b53-adb1-e8c76be6cae8
+#=begin 
+	e = Pyrometers.IsothermalSpectralQuantity(l->0.8 + l/10)
+	bb = Pyrometers.PlanckEmitter()
+	i = Pyrometers.fix_temperature(e * bb  , 1200.0)
+	l = range(1,2,50)
+	N = length(l)
+	poly_type = Pyrometers.ScaledPolynomials.BernsteinSymPoly{3,Float64}
+	mwp = Pyrometers.MWPPoint(SVector{N}(i.(l)) , SVector{N}(l) , SVector(0.2 , 0.3 , 0.5) ,   1234.6 , poly_type)
+	mwp(;emissivity_range = ((0.2 , 0.2 , 0.2) , (0.8 , 0.99 , 0.99)) , temperature_range = (1100.0 , 1300.0))
+	Pyrometers.emissivity(mwp)
+	mwp_pyro = Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
+end=#
+
 # ╔═╡ Cell order:
-# ╠═30743a02-c643-4bdc-837e-b97299f9520a
+# ╟─30743a02-c643-4bdc-837e-b97299f9520a
 # ╠═5e712312-0fc7-4205-84cc-834d57b814a3
-# ╠═abdc809b-b53c-4dff-ba6f-c636c73f3fca
-# ╠═ba23c985-74c4-41f3-8bc4-f7287e30e47f
-# ╠═9cd8fe6d-dcf9-472e-a019-19b4c1a182ed
-# ╟─6535717c-99ae-4e8e-94aa-d600f02537ed
+# ╟─abdc809b-b53c-4dff-ba6f-c636c73f3fca
+# ╟─bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
+# ╟─05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
 # ╟─171409eb-22b5-4bc5-a8e2-eac0932a24f3
+# ╟─643d9ff3-3a09-46c9-9013-92d111ccb229
 # ╟─d5ee3913-66be-47d7-a755-699ba64b4f98
-# ╟─d442014a-20e6-4be4-ac7f-f13de329dec5
+# ╠═d442014a-20e6-4be4-ac7f-f13de329dec5
 # ╟─27b3c586-9eb0-4a51-b9ca-a9c0379fccdf
 # ╟─f22d22b6-5d98-4cc4-998f-a53e92809618
 # ╟─b9bee300-59a4-4c7a-b525-439f5c62253e
 # ╟─7cc110e9-7655-4dfc-b1e0-ab3905866425
 # ╟─4d6337aa-cfc7-4154-a395-5aa53e23d01a
 # ╟─03d76e64-ebf4-432b-b9be-d4cb26275f55
+# ╟─59b01938-9235-4d39-be4e-e4fdf9f94418
+# ╟─6e3f01fb-a0bb-438b-a95a-2c503cc4961e
+# ╟─b7117f7b-ad22-4b09-8aa3-3f6a3878c149
+# ╟─5efd8d48-7fff-48fd-b361-2f06cd8bad53
+# ╟─af619a4d-b700-4996-960c-c9d0e75eac6a
+# ╟─0aad4eb6-e5dc-40e3-82b6-4d64f5b1af4f
+# ╠═e9e16b2b-88d7-40b6-997f-3a40e673faa8
 # ╟─2ad3ec82-54a2-49ac-94ef-579f808dfb1a
+# ╟─63d5b5bb-5e7d-4e83-83ae-3972f2465e28
+# ╟─95baff6c-2af3-401d-9db3-d6e6e31ab70a
+# ╟─27203e6b-9283-4da3-beb2-9f671100860f
+# ╟─5010ec7e-b83c-47c6-8c84-17bbcb8e40a1
 # ╟─8a066ee5-80e9-462f-9a61-15851468aa63
 # ╟─b7fac177-c211-4635-992f-e6473be7bdae
 # ╟─e2a9aa39-2490-4681-89d3-a01f058f6feb
 # ╟─02eee968-ff43-4b82-8d68-efede1a220dd
+# ╠═1ecac1b1-8efb-47d6-9e0a-093487e0c880
+# ╟─e9d0e216-07b5-4e41-925a-0c530e6ddf7b
 # ╟─9b08b767-7e8f-4483-9f2f-226022ce10e4
 # ╟─144b40ea-71c7-421f-8117-eab267ea5daf
 # ╟─c69acbf6-94fb-4ac3-8d56-d1f9dda11440
 # ╟─a861d56f-f6c9-4754-b7a9-ed63713f1f2f
-# ╠═7071a6f4-e296-4e53-8e6f-24f1f038c1a5
+# ╟─7071a6f4-e296-4e53-8e6f-24f1f038c1a5
 # ╟─712828a7-fb54-42e6-95fc-233243190f59
 # ╟─f763d449-2a7a-4008-a183-823a774bc25e
 # ╟─667f7c30-56e0-461f-b35b-c924007eb9f2
@@ -733,8 +1110,8 @@ end
 # ╟─c5ac80ee-8143-4c28-bbff-2ac761c71fac
 # ╟─0c9fe7b1-374c-4fb8-9cfe-9337389713bf
 # ╟─bc2d93ae-6c30-462c-96e0-30fdb84d7c63
-# ╠═d3199b6e-9779-4def-b701-fe85d1035045
-# ╠═8a6fe87d-0f7c-4577-9ac2-ea1ecf71016b
+# ╟─d3199b6e-9779-4def-b701-fe85d1035045
+# ╟─8a6fe87d-0f7c-4577-9ac2-ea1ecf71016b
 # ╟─72947d97-0a97-4064-a2fe-08d19dec0f0e
 # ╟─9ce196c1-8915-46da-9aba-f13d7655959a
 # ╟─3581aa29-714b-422a-8feb-d1a0c3ebeec7
@@ -744,35 +1121,59 @@ end
 # ╟─f181980f-bf72-4468-8daa-9461c6c901e0
 # ╟─5dafdc88-bd40-4347-aa62-e841d15c1bd7
 # ╟─a7ff8a2d-a81d-4474-b27f-565de2cf5dd3
-# ╟─18daa932-fd3a-4056-aa07-4dcf26c7d57a
+# ╠═18daa932-fd3a-4056-aa07-4dcf26c7d57a
 # ╟─36ba2396-bb5e-4d22-a58e-9ab27cd18b2d
 # ╟─91bbd553-4e4a-431d-9d54-b0f4882fd426
 # ╟─15f1519b-d924-4fa9-b212-eebba75c544a
 # ╟─cd9d9742-e9e6-47b9-afae-09e3018e7ebf
 # ╟─0404bf20-57a4-4c7c-bf23-70d3541a6787
 # ╟─8cef05a1-2974-4c38-b73e-fa706f347fcc
+# ╟─10298d52-d411-475f-b7f6-8562ed2a25bc
 # ╟─459f54a1-bbf0-4268-8bec-8142d436976a
-# ╟─1811e43c-f7db-47b1-9b83-bb38455d7db3
+# ╠═1811e43c-f7db-47b1-9b83-bb38455d7db3
 # ╟─ac2343b5-6ea5-47b1-9c39-643cdf6d93af
 # ╟─54339700-71fd-48bf-a2ef-0c3267b9d81b
 # ╟─7f76bc22-77c3-4eb3-9d49-588e653df2e7
 # ╟─a0197a9a-34bf-4a3e-af8a-c23ea777f482
-# ╠═7793976e-6714-4bc1-9d97-412dd2a67480
-# ╠═969907ad-0c38-4dfb-8e2d-ac25619fbe5f
+# ╟─7793976e-6714-4bc1-9d97-412dd2a67480
 # ╟─48b184a0-b1df-461e-a3f5-3c8be72ab875
-# ╠═5b647454-e5fc-4c65-8a0a-8eb499955cc1
-# ╠═fe1b4c33-1be4-46ab-ba70-b58504e169a6
-# ╠═baeafd9c-19bc-4dda-ade2-89b8cf534f88
-# ╠═b82e1650-ff56-45b1-baa1-ebf534400d73
-# ╠═cf6322f0-0802-4261-b78f-a0f97a8ae2ad
-# ╠═7450bf72-3a21-4322-995b-36e16e62fd18
-# ╠═43576cb6-87d6-4bcc-90bd-a7ab754e1245
-# ╠═ca361b35-22b3-4c8f-a1c2-ca5ffc594eff
-# ╠═10298d52-d411-475f-b7f6-8562ed2a25bc
-# ╟─c9634225-fa52-4747-8f45-3511141bd164
-# ╠═0cb50b02-ab41-416c-8610-c3ff318b117b
+# ╟─98cfdb54-7338-401f-8dcb-fd7752a70e0e
+# ╟─baeafd9c-19bc-4dda-ade2-89b8cf534f88
+# ╟─0cb50b02-ab41-416c-8610-c3ff318b117b
 # ╟─3e19d251-91f6-4383-bfc8-ffe816570f42
 # ╟─ce4f2fdd-16b1-46e8-88a4-a952896b6df8
 # ╟─dd1561e2-233f-425a-832f-130b49f0bf0b
 # ╟─05ec0ea2-cfec-4e91-a46a-68bbdaefd562
 # ╠═e480137d-b6d9-4e18-92f0-640292bbb5f0
+# ╠═1c02bee4-29af-4a5f-8b83-0ee6d5e226be
+# ╠═abf9e80e-49e9-4a35-bc68-bb6c4260fa94
+# ╟─5e64a74b-fe14-4461-871b-6b609b5e83cd
+# ╟─ba559d2d-3bd0-4cd1-8836-8ab0b860c3a5
+# ╟─4f6c8a96-2347-496a-8d71-1d410fa30ac9
+# ╠═805cd62e-a188-4e3f-a870-990530cbc7db
+# ╠═5a56e1db-5909-443f-8f8f-e8a640b9bd3e
+# ╟─253847d7-87fa-461d-8361-fac6c6facf73
+# ╠═86b4b811-7c70-49a5-92f2-4ba409a0ef32
+# ╟─4894c2ab-4db5-4b7c-9c4a-9dd1c5345c28
+# ╟─c2582621-54fb-44b1-a3ea-4cfacb6062ff
+# ╟─c7554489-1d97-4b9a-a3e9-4be84c82b552
+# ╟─5815a317-233a-493a-a8be-03dc7d608c0e
+# ╟─77b352db-6734-4501-b9d3-f63ff2adbaf7
+# ╟─bf58aa17-dc84-4bee-94d3-25895b12f553
+# ╟─c8647683-a25e-4c04-bae0-52a5f40233e9
+# ╟─7957b928-29db-4342-9993-15b63023883b
+# ╟─3b01166a-451e-4e15-ae34-7049703331f2
+# ╠═10c7b1f0-3565-456d-a4bf-84aff0aca60b
+# ╠═c785b041-9ecb-484c-a25b-5de976bd9184
+# ╠═47214b96-bdbc-4ff1-b6cb-2ef0c869b08b
+# ╟─6a386feb-48a9-40ac-8fac-be492183ed2b
+# ╟─c0f25834-2bc2-4c65-aefa-466d8017d461
+# ╠═a5f30290-343d-4a3a-ad85-589fbe8ed570
+# ╠═505b9422-0ba8-46ba-87ed-ca8ccf31fee1
+# ╠═bd668cb9-991f-4d0b-aebb-ada6cf00998d
+# ╠═6ed7f722-5980-4d48-9d6b-f8fbfe56cd9f
+# ╠═a9b55a2b-1a84-4b74-ad90-13cfc87ad773
+# ╠═a4a9f724-3a0b-4351-af90-778932ee2b1f
+# ╠═1d53599d-9b03-4530-9bf3-2f2c20fd9615
+# ╠═ebde5455-47f4-4d9e-ba3e-11656c4dc3b5
+# ╠═da013910-4176-4b53-adb1-e8c76be6cae8
