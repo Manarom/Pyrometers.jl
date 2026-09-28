@@ -98,3 +98,5 @@ mwp_pyro = Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
 mwp_pyro = Pyrometers.MultiWavelengthPyrometer(SVector{50}(l))
 @code_warntype Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
 epoly = Pyrometers.emissivity_poly(mwp)
+
+poly = poly_type([0.1, 2.0 , 3.4])

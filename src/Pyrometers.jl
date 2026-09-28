@@ -10,7 +10,7 @@ module Pyrometers
             ScaledPolynomials
 
     import  PlanckFunctions as Planck
-    
+   
     export SpectralBandPyrometer, 
         SingleWavelengthPyrometer , 
         TwoBandsRatioPyrometer ,
@@ -18,12 +18,19 @@ module Pyrometers
         MultiWavelengthPyrometer , 
         convert_temperature,
         integral_emissivity,
+        set_emissivity! , 
         DefaultPyrometersTypes,
         fit_ϵ! , fit_ϵ , 
         Pyrometer , RatioPyrometer , 
         TabularQuantity , AnalyticalSpectralQuantity ,
         IsothermalSpectralQuantity , GenericDifferentiableSpectralQuantity , 
-        stray_radiation_corrected_temperature , PlanckEmitter
+        stray_radiation_corrected_temperature , PlanckEmitter , 
+        external_source_corrected_temperature , 
+        EnclosureGeometry , 
+        ViewFactorGeometry , 
+        fix_temperature , 
+        SpectralReflectivity,
+        emissivity , emissivity_poly
     """
     Default pyrometers types 
 
@@ -36,7 +43,7 @@ const DefaultPyrometersTypes = OrderedDict(
                     :E => SVector{2}([4.8, 5.2]),
                     :F => SVector{1}([7.9]),
                     :K => SVector{2}([8.0, 9.0]),
-                    :B => SVector{2}([9.1,14.0])
+                    :B => SVector{2}([9.1 , 14.0])
     )
     abstract type AbstractDiscreteQuantity{LT , ET} end
     const IsothermalSpectralQuantity = Planck.IsothermalSpectralQuantity 
@@ -185,8 +192,9 @@ Type wrapper around discrete quantity with two columns `λ` and `i`
                 Planck._spectral_ratio_second_derivative(e1 , de1 , dde1 , e2 , de2 , dde2)
         )
     end     
-    Base.:/(sq1::Union{AbstractSpectralQuantity , Number} , sq2::AbstractSpectralQuantity ) = SpectralQuantitiesRatio(sq1 , sq2)
-    Base.:/(sq1::AbstractSpectralQuantity , sq2::Union{AbstractSpectralQuantity , Number}  ) = SpectralQuantitiesRatio(sq1 , sq2)
+    Base.:/(sq1::Number , sq2::ASQ ) = SpectralQuantitiesRatio(sq1 , sq2)
+    Base.:/(sq1::ASQ , sq2:: Number  ) = SpectralQuantitiesRatio(sq1 , sq2)
+    Base.:/(sq1::ASQ , sq2::ASQ ) = SpectralQuantitiesRatio(sq1 , sq2)
 
     struct SpectralQuantitiesSum{S1 , S2} <: AbstractSpectralQuantity
         e1::S1
@@ -211,6 +219,7 @@ Type wrapper around discrete quantity with two columns `λ` and `i`
     Base.:+(asq1::ASQ , asq2::ASQ) = SpectralQuantitiesSum(asq1 , asq2)
     Base.:+(asq1::Number , asq2::ASQ) = SpectralQuantitiesSum(asq1 , asq2)
     Base.:+(asq1::ASQ , asq2::Number) = SpectralQuantitiesSum(asq2 , asq1)
+
     Base.:-(asq1::ASQ , asq2::Number) = SpectralQuantitiesSum(-asq2 , asq1)
     Base.:-(asq1::T , asq2::ASQ) where T <: Number = SpectralQuantitiesSum(asq1 , -one(T) * asq2)
     Base.:-(asq1::ASQ, asq2::ASQ)  = SpectralQuantitiesSum(asq1 , (-1.0) * asq2)
@@ -269,6 +278,9 @@ function fit_spectral_quantity_integrator(sqi::SpectralQuantityIntegrator , imea
         _to_halley(Planck.eval_Dₜ(sqic.sqi , t) , sqic.i)
     end    
     Planck.∫ₗ(a::AbstractSpectralQuantity , l1 , l2) = SpectralQuantityIntegrator(a , l1 ,l2)
+    """
+        Common type for all continuous or discrete quantities 
+    """
     const AbstractContinuousOrDiscreteQuantity = Union{AbstractSpectralQuantity , AbstractDiscreteQuantity}
     """
         GenericDifferentiableSpectralQuantity(f, backend=AutoForwardDiff())

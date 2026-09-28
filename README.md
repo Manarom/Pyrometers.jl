@@ -1,39 +1,46 @@
 [![Build Status](https://github.com/Manarom/Pyrometers.jl/actions/workflows/CI.yml/badge.svg?branch=main)](https://github.com/Manarom/Pyrometers.jl/actions/workflows/CI.yml?query=branch%3Amain)
 
 [![Dev](https://img.shields.io/badge/docs-dev-blue.svg)](https://manarom.github.io/Pyrometers.jl)
-
 # Pyrometers.jl
 
-`Pyrometers.jl` is a high-performance Julia package designed for modeling, simulating, and evaluating non-contact temperature measurements. It provides fast calculation methods for brightness (radiation) and two-color (ratio) pyrometers operating at single wavelengths or over integrated spectral bands.
+`Pyrometers.jl` is a Julia package designed for modeling, simulating, and evaluating non-contact temperature measurements. It provides fast calculation methods for brightness (radiation) and two-color (ratio) pyrometers operating at single wavelengths or over integrated spectral bands. It also supports multiwavelength pyrometers operating at multiple wavelengths simultaneously, allowing the decoupling of emissivity from blackbody wavelength dependence using non-linear least-squares fitting.
 
-The package is engineered from the ground up for strict **zero-allocation execution** and full type stability, making it ideal for real-time control loops, high-frequency industrial data parsing, and automatic differentiation.
+The package is engineered from the ground up for strict **zero-allocation execution** and full type stability.
+
+The purpose of this package is to simulate virtual pyrometers of **five different types**:
+
+* `SpectralBandPyrometer`: A classical pyrometer operating within a fixed wide spectral band.
+* `TwoBandsRatioPyrometer`: A spectral ratio pyrometer that accounts for the finite width of two channels.
+* `SingleWavelengthPyrometer`: A standard pyrometer operating at a single, fixed wavelength.
+* `TwoWavelengthRatioPyrometer`: A classical spectral ratio pyrometer that does not account for the finite width of its spectral channels.
+* `MultiwavelengthPyrometer`: A pyrometer based on least-squares fitting of discrete spectral intensity data across multiple wavelengths (theoretically eliminating the need to know surface emissivity).
 
 ---
 
-## 🛠 Main Functionality
+## Main Functionality
 
-* **Temperature Inversion (`measure` / Functor Syntax):** Solves for the actual surface temperature from a given raw detector signal power handle using high-order root-finding methods (Halley's method).
-* **Stray Radiation Compensation (`stray_radiation_corrected_temperature`):** Isolates and removes parasitic reflected background radiation, hot furnace wall reflections, and grey-body cavity noise from raw measurements to isolate the true target temperature.
-* **Signal Generation (`signal`):** Simulates the exact radiant power or intensity value hitting a detector for any given target temperature and emissivity configuration.
+* **Temperature Inversion (`measure` / Functor Syntax):** Solves for the actual surface temperature from a given raw detector signal power or discrete intensity using high-order root-finding methods (Halley's method) or least square fitting using Levenberg-Marquardt method (custom implementation on StaticArrays) for multiwavelength pyrometer.
+* **Stray Radiation Compensation (`stray_radiation_corrected_temperature` and `external_source_corrected_temperature`):** Isolates and removes parasitic reflected background radiation, hot furnace wall reflections, and gray-body cavity noise from raw measurements to extract the true target temperature.
+* **Signal Generation (`signal`):** Simulates  radiant power or intensity value hitting a detector for any given target temperature and emissivity configuration.
 * **Lazy Spectral Algebra:** Features an embedded symbolic-numeric composition engine (`*`, `/`, `+`) for mixing complex temperature-dependent spectral functions (`AbstractSpectralQuantity`) and raw tabular data matrices (`AbstractDiscreteQuantity`) with zero allocation overhead.
-* **Calibration Optimization (`fit_ϵ` / `fit_ϵ!`):** Back-calculates the necessary effective emissivity or spectral ratio slope required to match a pyrometer's reading with a known reference temperature.
+* **Calibration Optimization (`fit_ϵ` / `fit_ϵ!`):** Back-calculates the effective emissivity or spectral ratio slope required to match a pyrometer's reading with a known reference temperature.
 
-There are several pre-defined industrial pyrometers with specific spectral ranges available out of the box (see the figure below):
+Several pre-defined industrial pyrometers with specific spectral ranges are available out of the box (see the figure below):
 
 <p float="left">
-  <img src="./notebooks/Pyrometers.png" width="400"/>
+  <img src="./notebooks/Pyrometers.png" width="400" alt="Pyrometers Spectral Ranges"/>
 </p>
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### 1. Core Temperature Solver
 Feed an incoming raw detector signal power or ratio handle to your pyrometer, and get the actual temperature back instantly:
 
 ```julia
 using Pyrometers 
-import Pyrometers.Planck as PF # package for thermal radiation is PlanckFunction.jl
+import Pyrometers.Planck as PF # The package for thermal radiation is PlanckFunction.jl
 
 ϵ = 0.55 # surface emissivity
 T_real = 1234.89
@@ -52,44 +59,49 @@ r *= (ϵ / 0.2)
 T_measured = p(ϵ * i) 
 T_measured2 = p_color(r)
 
-println("T_real: \$(T_real) K")
-println("Band pyrometer: \$(T_measured) K")
-println("Ratio pyrometer: \$(T_measured2) K")
+# Multiwavelength pyrometer
+l = range(1, 2, 30)
+i = 0.3 * PF.ibb.(l, 1273.15) # thermal emission spectrum of a surface with constant emissivity 
+p_multiwavelength = MultiwavelengthPyrometer{30}(l) # by default approximates emissivity with a Bernstein polynomial
+T = p_multiwavelength(i) # evaluates temperature without a priori emissivity knowledge
+# T ≈ 1273.15
+e = emissivity_poly(p_multiwavelength) # returns fitted emissivity polynomial approximation as a callable scaled polynomial object
+e.(1:0.1:1.5) # returns emissivity evaluated at new wavelengths
 ```
 
 ### 2. De-Noising Ambient Furnace Reflections (Advanced Radiosity)
 If your target is inside a hot oven or narrow cavity, background reflections distort your readings. Wipe them out by evaluating mutual reflection configurations (such as an enclosure cavity or finite parallel plates) using geometric factors (ξ):
 
 ```julia
-using Pyrometers
+using Pyrometers 
 
-p = SpectralBandPyrometer(2.0, 4.5)
-T_measured = 1200.0  # Raw contaminated temperature reading
-T_furnace  = 1500.0  # Temperature of the heated parasitic source/walls
+ϵ_surf = IsothermalSpectralQuantity(l -> 0.6 + l/20) # surface emissivity 
+ϵ_wall = IsothermalSpectralQuantity(l -> 0.9 - l/20) # external source emissivity 
+Tsource = 1500.0 # source temperature
+Ttrue = 987.5 # true temperature of the surface
 
-# Define arbitrary temperature-dependent spectral profiles for your target and furnace walls
-# Using the built-in automatic differentiation backend 
-ϵ_object = GenericDifferentiableSpectralQuantity((λ, t) -> 0.6 - 0.0001 * t)
-ϵ_wall   = 0.85 # Supports constant gray numbers seamlessly too
+# Imitating an external radiation source 
+bb = PlanckEmitter() # creating external source imitator 
+i_incident = fix_temperature(bb, Tsource)
+refl = SpectralReflectivity(ϵ_surf)
 
-# Case A: Small target enclosed inside an enormous furnace cavity (ξ = 0.0)
-T_true_enc = stray_radiation_corrected_temperature(p, T_measured, ϵ_object, T_furnace, ϵ_wall, EnclosureGeometry())
+p = SpectralBandPyrometer(2.0, 3.0)
+i_full = ϵ_surf * bb + refl * ϵ_wall * i_incident # spectral algebra usage
+i_full_iso = fix_temperature(i_full, Ttrue)
+I_total = integrate(p, i_full_iso)
+T_meas = p(I_total, ϵ_surf) # measured temperature including stray radiation impact
 
-# Case B: Closely spaced comparable surfaces or infinite parallel plates (ξ = 1.0)
-T_true_par = stray_radiation_corrected_temperature(p, T_measured, ϵ_object, T_furnace, ϵ_wall, ParallelGeometry())
-
-# Case C: Custom geometry using an area-weighted view factor ξ = F₁₂ * A₁ / A₂
-geom = ViewFactorGeometry(0.45)
-T_true_custom = stray_radiation_corrected_temperature(p, T_measured, ϵ_object, T_furnace, ϵ_wall, geom)
+geom = EnclosureGeometry()
+T_corrected = external_source_corrected_temperature(p, T_meas, ϵ_surf, Tsource, ϵ_wall, geom) # applying correction: T_corrected ≈ Ttrue
 ```
 
 ### 3. Combining Lazy Spectral Quantities with Algebra
-Build complex custom multi-layer or selective emission models on the fly using native algebraic operators. The underlying code evaluates the necessary first and second-order derivatives (`eval_Dₜ`) over the composite chain rule without a single heap allocation:
+Build complex custom multi-layer or selective emission models on the fly using native algebraic operators. The underlying code evaluates the necessary first- and second-order derivatives (`eval_Dₜ`) over the composite chain rule without a single heap allocation:
 
 ```julia
 import Pyrometers as P
 
-i_source = P.PlanckEmitter() 
+i_source = P.PlanckEmitter() # plack spectrum emitter 
 e_source = P.IsothermalSpectralQuantity(l -> 0.9 + 1e-2 * l)
 
 # Create a custom temperature-dependent compound profile using lazy products
@@ -100,6 +112,11 @@ P.set_emissivity!(p, 0.6)
 
 # Evaluates the full model composition and filters background noise safely
 T_clean = P.stray_radiation_corrected_temperature(p, 1200.0, i_corrected_source, 1300.0)
+
+# Multiwavelength pyrometry measurement 
+p_multi = P.MultiwavelengthPyrometer{50}(range(1, 2, 50))
+i = P.fix_temperature(i_source * e_source, 1345.6) # fixing source true temperature 
+T = p_multi(i) # T ≈ 1345.6
 ```
 
 ### 4. Converting Operating Temperatures & Emissivity Tuning
@@ -122,18 +139,15 @@ fit_ϵ!(p_band, T_measured, T_real)
 
 ---
 
-
-## 📌 Roadmap & Future TODOs
+## Roadmap & Future TODOs
 
 The long-term objective of this ecosystem is to establish a comprehensive, unified pyrometry toolkit in Julia. The immediate development focus is centered on merging classical radiative instruments with data-driven spectral inversion techniques.
 
-* **Integrate Multiwavelength Capabilities:** Port and combine the core inversion algorithms from [BandPyrometry.jl](https://github.com/Manarom/BandPyrometry.jl.git) into this package.
-* **Emissivity-Agnostic Pyrometry:** Incorporate advanced multiwavelength pyrometry methods capable of reconstructing target surface temperatures from continuous thermal emission spectra *without requiring an a priori known emissivity profile*.
-* **Unified API Design:** Blend classical brightness/ratio equations with constrained polynomial optimization (e.g., via `ScaledPolynomials.jl`) into a single, cohesive interface.
-* **Maintain Zero-Allocation Performance:** Ensure that incoming multiwavelength optimization routines and data-parsing pipelines respect the performance constraints of the package core (strict type-stability, static matrix sizing, and heap-allocation-free calculations).
+* Add stray radiation and external source exclusion for multiwavelength pyrometers.
+* Add geometrical integration of external radiation (through multiple view factors).
 
 ---
 
-## 📄 License
+## License
 
 This package is open-source software licensed under the [MIT License](LICENSE).

@@ -856,7 +856,7 @@ measured(p::MultiWavelengthPyrometer) = measured(p.mwp)
 
 calculated(p::MultiWavelengthPyrometer) = p.mwp.Ic
 emissivity(p::MultiWavelengthPyrometer) = p.mwp.ϵ
-
+emissivity_poly(p::MultiWavelengthPyrometer) = emissivity_poly(p.mwp)
 
 measured(p::MWPPoint) = measured(p.bb)
 measured(p::BBPoint) = p.I_measured
