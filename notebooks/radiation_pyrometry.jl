@@ -978,9 +978,6 @@ The following two figures show:
 
 """
 
-# ╔═╡ 47214b96-bdbc-4ff1-b6cb-2ef0c869b08b
-λ = MVector{50}(range(λ_fit_vand[1] , λ_fit_vand[2] , 50))
-
 # ╔═╡ 6a386feb-48a9-40ac-8fac-be492183ed2b
 @bind  a_real PlutoUI.combine() do Child
 	md"""
@@ -1006,10 +1003,11 @@ The following two figures show:
 end
 
 # ╔═╡ 10c7b1f0-3565-456d-a4bf-84aff0aca60b
-poly_obj = Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[poly_type](a_real)
-
-# ╔═╡ c785b041-9ecb-484c-a25b-5de976bd9184
-scaled_poly = SP.ScaledPolynomial(poly_obj , xmin = λ_fit_vand[1] , xmax =λ_fit_vand[2])
+begin 
+	poly_obj = Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[poly_type](a_real)
+	scaled_poly = SP.ScaledPolynomial(poly_obj , xmin = λ_fit_vand[1] , xmax =λ_fit_vand[2])
+	λ = MVector{50}(range(λ_fit_vand[1] , λ_fit_vand[2] , 50))
+end
 
 # ╔═╡ c0f25834-2bc2-4c65-aefa-466d8017d461
 begin 
@@ -1020,20 +1018,18 @@ begin
 	p_em
 end
 
-# ╔═╡ 505b9422-0ba8-46ba-87ed-ca8ccf31fee1
-multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ)}(λ)
-
-# ╔═╡ bd668cb9-991f-4d0b-aebb-ada6cf00998d
-e_surf = IsothermalSpectralQuantity(scaled_poly)
-
-# ╔═╡ 6ed7f722-5980-4d48-9d6b-f8fbfe56cd9f
-bb = PlanckEmitter()
-
-# ╔═╡ a9b55a2b-1a84-4b74-ad90-13cfc87ad773
-i_measured = Pyrometers.fix_temperature(e_surf * bb , 1234.6)
+# ╔═╡ 963fb46a-0ea3-48b5-b62f-e37c8fde1864
+begin 
+	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ)}(λ)
+	e_surf = IsothermalSpectralQuantity(scaled_poly)
+	i_measured = Pyrometers.fix_temperature(e_surf * PlanckEmitter() , 1234.6)
+end
 
 # ╔═╡ a4a9f724-3a0b-4351-af90-778932ee2b1f
-multiwavelength_pyro(i_measured)
+multiwavelength_pyro(i_measured )
+
+# ╔═╡ 66ec489b-158d-4348-b6fe-aa7f3f772bd4
+typeof(multiwavelength_pyro)
 
 # ╔═╡ 1d53599d-9b03-4530-9bf3-2f2c20fd9615
 begin 
@@ -1164,16 +1160,12 @@ end=#
 # ╟─7957b928-29db-4342-9993-15b63023883b
 # ╟─3b01166a-451e-4e15-ae34-7049703331f2
 # ╠═10c7b1f0-3565-456d-a4bf-84aff0aca60b
-# ╠═c785b041-9ecb-484c-a25b-5de976bd9184
-# ╠═47214b96-bdbc-4ff1-b6cb-2ef0c869b08b
 # ╟─6a386feb-48a9-40ac-8fac-be492183ed2b
 # ╟─c0f25834-2bc2-4c65-aefa-466d8017d461
+# ╠═963fb46a-0ea3-48b5-b62f-e37c8fde1864
 # ╠═a5f30290-343d-4a3a-ad85-589fbe8ed570
-# ╠═505b9422-0ba8-46ba-87ed-ca8ccf31fee1
-# ╠═bd668cb9-991f-4d0b-aebb-ada6cf00998d
-# ╠═6ed7f722-5980-4d48-9d6b-f8fbfe56cd9f
-# ╠═a9b55a2b-1a84-4b74-ad90-13cfc87ad773
 # ╠═a4a9f724-3a0b-4351-af90-778932ee2b1f
+# ╠═66ec489b-158d-4348-b6fe-aa7f3f772bd4
 # ╠═1d53599d-9b03-4530-9bf3-2f2c20fd9615
 # ╠═ebde5455-47f4-4d9e-ba3e-11656c4dc3b5
 # ╠═da013910-4176-4b53-adb1-e8c76be6cae8

@@ -201,29 +201,6 @@ function fit_T!(point::Union{EmPoint , MWPPoint};
     function (emp::Union{EmPoint,MWPPoint})()
         return fit_T!(emp).T
     end
-    """
-    covariance(bp::MWPPoint)
-
-Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
-"""
-function fitting_covariance(bp::MWPPoint{N,Nx3,P}) where {N,Nx3,P}
-    sigma_square = sumabs2(bp.e_p.ri)/degrees_of_freedom(bp)
-    h = similar(bp.hessian)
-    hess!(h, bp.x, bp::MWPPoint)
-    return 2*sigma_square*inv(h)
-end
-"""
-    fitting_covariance(em::EmPoint{N})
-
-Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
-"""
-function fitting_covariance(em::EmPoint{N,Nx3,T}) where {N,Nx3,T}
-    sigma_square = sumabs2(em.ri)/degrees_of_freedom(em)
-    h = MMatrix{1,1,T,1}(undef)
-    hess!(h,temperature(em),em)
-    return 2*sigma_square*inv.(h)
-end
-fitting_variance(em::EmPoint) = vec(fitting_covariance(em))
 """
     fitting_variance(bp::MWPPoint)
 

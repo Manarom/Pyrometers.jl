@@ -107,3 +107,15 @@ Simpsons methods for evenly-spaced grids
     end
     _get_step(x::AbstractRange) = step(x)
     _get_step(x::AbstractVector)  =  x[2] - x[1]
+
+
+    macro show_stack()
+    # Capture file and line number of the macro call site
+    loc = string(__source__.file, ":", __source__.line)
+    return quote
+        println("Stack trace at ", $loc, ":")
+        # Base.show_stacktrace cleanly prints the array of StackFrames
+        Base.show_stacktrace(stdout, stacktrace())
+        println() # Empty line for padding
+    end
+end

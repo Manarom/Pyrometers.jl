@@ -28,26 +28,10 @@ Pyrometers.fit_integral(bb ,1.0 , 2.0 , i_int)
 bbp = Pyrometers.BBPoint(SVector{50}(i) , SVector{50}(l))
 bbp(bb.(l , 1685) )
 
-@benchmark Pyrometers._solve_problem($bbp , $[1237.8] , $[20.0] , $[3000.0] , LBFGS)
-
-@benchmark $bbp(;optimizer=LBFGS)
 @benchmark Pyrometers.fit_T!($bbp )
 @benchmark $bbp()
 @benchmark Pyrometers.fit_T!($bbp , $LBFGS )
 @code_warntype Pyrometers.fit_T!(bbp )
-
-optim_fun = OptimizationFunction(Pyrometers.disc , grad = Pyrometers.grad! , hess = Pyrometers.hess!)
-optim_fun([1274.0] , bbp)
-prob = OptimizationProblem(optim_fun , [1000.0] , bbp)
-solve(prob , LBFGS())
-starting_vector = [1000.0]
-probl = OptimizationProblem(
-                    optim_fun, 
-                    starting_vector,
-                    bbp, 
-                )
-solve(probl , LBFGS())
-@benchmark solve($probl , $(Brent()))
 
 bb = PlanckEmitter()
 l = range(1,2,50)
@@ -55,8 +39,8 @@ Ttrue = 1076.894567
 i = bb.(l , Ttrue)
 N = length(l)
 noise = 1e-3
-mwp = Pyrometers.MWPPoint(SVector{N}(i .+ 0.0 * randn(N)) , SVector{N}(l) , SVector((0.2 , 0.3 , 0.4 , 1273.15)))
-mwp(emissivity_range = (0.1 , 1.0))
+mwp = Pyrometers.MWPPoint{N , 3}(i .+ noise* randn(N), SVector{N}(l) , (0.2 , 0.3 , 0.4) , 1273.15)
+mwp(i , emissivity_range = (0.1 , 1.0))
 Ttrue
 @benchmark $mwp(emissivity_range = (0.9 , 1.0))
 Pyrometers.fit_T!(mwp , MVector((0.2 , 0.3 , 0.4 , 1273.15)) , nothing ;  emissivity_range = (0.5 , 1.0))      

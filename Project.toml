@@ -44,6 +44,7 @@ ADTypes = "1.23.0"
 PlanckFunctions = "1.1.4"
 QuadGK = "2.11.3"
 Roots = "3.0.6"
+julia = "1.12"
 
 [extras]
 ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"

@@ -260,8 +260,9 @@ end
 
 # Multiwavelength pyrometry 
 
-measure(p::MultiWavelengthPyrometer , i::AbstractVector; 
-                                starting_vector = nothing , kwargs...) = p.mwp(i; starting_vector = starting_vector)
+measure(p::MultiWavelengthPyrometer , i::AbstractVector; kwargs...) = p.mwp(i; kwargs...)
+
+measure(p::MultiWavelengthPyrometer , i::Union{IsothermalSpectralQuantity , AbstractDiscreteQuantity};   kwargs...) = measure(p , integrate(p , i) ; kwargs...)
 
 #measure(p::MultiWavelengthPyrometer , i::Union{IsothermalSpectralQuantity , Abstract}; 
                         #starting_vector = nothing) = p.mwp(i.(wavelength(p)); starting_vector = starting_vector)

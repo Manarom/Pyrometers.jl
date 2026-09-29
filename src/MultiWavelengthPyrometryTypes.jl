@@ -185,6 +185,21 @@ function MWPPoint(measured_Intensity::StaticArray{Tuple{N},T,1},
     end
 end
 
+function MWPPoint{N , Pm1}(i::AbstractVector{T} , 
+                                           l::AbstractVector{T} , 
+                                           initial_emissivity::Union{AbstractVector{T} , NTuple{Pm1}} , 
+                                           initial_temperature::Number=1000.0 , 
+                                           ::Type{PolyType} = BernsteinSymPoly{Pm1,T};
+                                            I_sur::Union{AbstractVector{T} , Nothing}=nothing) where PolyType <: AbstractPoly{Pm1,T} where {N , Pm1 , T}
+
+    return MWPPoint(MVector{N}(i) , 
+            MVector{N}(l) , 
+            MVector{Pm1}(initial_emissivity) , 
+            T(initial_temperature) , 
+            PolyType; 
+            I_sur = I_sur)
+end
+
 temperature(emp::BBPoint) = emp.Tib[]
 temperature(bp::MWPPoint) = bp.bb.Tib[]
 
@@ -751,8 +766,7 @@ function fit_T!(point::Union{BBPoint , MWPPoint},
                     temperature_range::B=nothing , 
                     result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector , Nothing , NTuple{2}} , 
                                                   C <: Union{AbstractVector , Nothing , NTuple{2}} , 
-                                                  D }
-                                          
+                                                  D }                                
         (lb , ub) = evaluate_box_constraints(point, emissivity_range, temperature_range)
         trim_starting_vector_to_box!(starting_vector , lb , ub)
         (results , optimizer , problem) = _solve_problem(point , starting_vector , lb , ub , optimizer)
@@ -812,6 +826,31 @@ function _solve_problem(point::MWPPoint{N, Nx3, P} , starting_vector , lb , ub ,
                     SVector(ub))  
 
 end
+    """
+    covariance(bp::MWPPoint)
+
+Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
+"""
+function fitting_covariance(bp::MWPPoint{N,Nx3,P}) where {N,Nx3,P}
+    sigma_square = sumabs2(bp.e_p.ri)/degrees_of_freedom(bp)
+    h = similar(bp.hessian)
+    hess!(h, bp.x, bp::MWPPoint)
+    return 2*sigma_square*inv(h)
+end
+
+"""
+    fitting_covariance(em::EmPoint{N})
+
+Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
+"""
+function fitting_covariance(em::EmPoint{N,Nx3,T}) where {N,Nx3,T}
+    sigma_square = sumabs2(em.ri)/degrees_of_freedom(em)
+    h = MMatrix{1,1,T,1}(undef)
+    hess!(h,temperature(em),em)
+    return 2*sigma_square*inv.(h)
+end
+
+fitting_variance(em::EmPoint) = vec(fitting_covariance(em))
 
 struct MultiWavelengthPyrometer{N , T , MWP} <: AbstractPyrometer{N,T}
     mwp::MWP
@@ -848,9 +887,26 @@ MultiWavelengthPyrometer(λ::StaticVector{N , T}  ;
                    )
     return MultiWavelengthPyrometer(mwp)                            
 end
-MultiWavelengthPyrometer{N}(l::AbstractVector;kwargs...) where N = MultiWavelengthPyrometer(MVector{N}(l); kwargs...) 
+MultiWavelengthPyrometer{N}(l::AbstractVector; kwargs...) where N = MultiWavelengthPyrometer(MVector{N}(l); kwargs...) 
+function MultiWavelengthPyrometer{N , P}(l::AbstractVector; 
+                            starting_emissivity::Union{Base.AbstractVecOrTuple , Nothing , Number} = nothing , 
+                            T_starting::T = 1000.0,
+                            i_measured::Union{Nothing , AbstractVector{T} , AbstractSpectralQuantity} = nothing,
+                            polynomial_type::Val{PT} = Val(:bernstein) , 
+                            I_sur::Union{AbstractVector{T}, Nothing} = nothing) where {N , P , T <: Number , PT}
+    _starting_emissivity = _fill_N(starting_emissivity)                   
+    MultiWavelengthPyrometer(MVector{N}(l); starting_emissivity = _starting_emissivity , 
+    T_starting = T_starting , polynomial_type = polynomial_type , I_sur = I_sur , i_measured = i_measured)  
+end
 
-(p::MultiWavelengthPyrometer)(;kwargs...) = p.mwp(;kwargs...)
+_fill_N(::Val{P} , tpl::NTuple{P}) where P = tpl 
+_fill_N( ::Val{P} , tpl::T=0.5) where{P , T <: Number} = ntuple(P) do _ 
+    tpl
+end 
+_fill_N( ::Val{P} , ::Nothing) where{P} = _fill_N(Val(P))
+
+(p::MultiWavelengthPyrometer)(; kwargs...) = p.mwp( ; kwargs...)
+
 wavelengths(p::MultiWavelengthPyrometer) = p.mwp.bb.λ
 measured(p::MultiWavelengthPyrometer) = measured(p.mwp)
 
