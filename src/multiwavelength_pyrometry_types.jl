@@ -237,7 +237,9 @@ function clear_cache!(p::BBPoint{N , M , T}) where {N,M,T}
     return p
     
 end
-const SimplyTypedMW{N,P,T} = MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T} where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
+
+const SimplyTypedMW{N, P, T , PolyType} = MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T, PolyType} where {N, P, T, PolyType, Nx3, NxP, PxP, Pm1, NxPm1, Pm1xPm1}
+
 function clear_cache!(p::SimplyTypedMW{N , P , T}) where {N , P , T}
     
     clear_cache!(p.bb)
@@ -536,7 +538,7 @@ function hess!(h , x::AbstractVector , bp::MWPPoint)
             copyto!(bp.x_hess_vec  , x)
         end
     end
-
+    SVector
     function evaluate_box_constraints(::BBPoint{N, Nx3, T} , 
                             emissivity_range::B=nothing, 
                             temperature_constraint::C = nothing) where {N, Nx3, T, 
@@ -744,13 +746,15 @@ function hess!(e::BBPoint{M , N , T} , t::Number ) where { M , N ,T <: Number} #
 
 function fit_T!(p::Union{BBPoint , MWPPoint},
             o = DefaultOptimizer();
+            e_starting::Union{Nothing , AbstractVector , Number , NTuple} = nothing,
+            T_starting::Union{Nothing , Number} = 1000.0,
             emissivity_range::C=nothing, 
             temperature_range::B=nothing , 
             result_type::Val{D} = Val(:T)) where {B <: Union{AbstractVector , Nothing , NTuple{2}} , 
                                                   C <: Union{AbstractVector , Nothing , NTuple{2}} , 
                                                   D }  
 
-        sv = get_default_starting_vector(p)
+        sv = make_starting_vector(p , e_starting , T_starting)
         return fit_T!(p , sv , o ;
                         emissivity_range = emissivity_range , 
                         temperature_range = temperature_range , 
@@ -758,7 +762,29 @@ function fit_T!(p::Union{BBPoint , MWPPoint},
 end
 get_default_starting_vector(::BBPoint{M , N, T}) where {M , N, T} = MVector{1}(T(1000.0))
 get_default_starting_vector(p::MWPPoint) = MVector(p.x)
+make_starting_vector(bbp::BBPoint , _ , ::Nothing) = get_default_starting_vector(bbp)
+make_starting_vector(::BBPoint{M , N, T} , _ , t::Number) where {M , N, T} = MVector{1}(T(t))
 
+make_starting_vector(mwp::MWPPoint , ::Nothing , ::Nothing) = get_default_starting_vector(mwp)
+function make_starting_vector(::SimplyTypedMW{N, P, T} , 
+                            e::Base.AbstractVecOrTuple , t::Number) where {N, P, T}
+    return MVector{P , T}((e... , T(t)))    
+end
+function make_starting_vector(mwp::SimplyTypedMW{N, P, T} , 
+                            ::Nothing , t::Number) where {N, P, T}
+    sv =  get_default_starting_vector(mwp)
+    @show N , P , T
+    sv[end] = T(t)
+    return sv  
+end
+function make_starting_vector(mwp::MWPPoint , 
+                            e::Base.AbstractVecOrTuple , ::Nothing)
+    return make_starting_vector(mwp , e , temperature(mwp)) 
+end
+make_starting_vector(mwp::SimplyTypedMW{N, P , T} , e::Number , t) where {N, P , T} = begin 
+    _e = _fill_N(Val(P - 1) , T(e))
+    return make_starting_vector(mwp , _e , t)
+end
 function fit_T!(point::Union{BBPoint , MWPPoint}, 
                     starting_vector::AbstractVector,
                     optimizer = DefaultOptimizer();
@@ -780,17 +806,13 @@ function (emp::Union{MWPPoint , BBPoint})(I::Union{AbstractVector , Number}; kwa
 end
 
 function (emp::Union{BBPoint , MWPPoint})(; optimizer = DefaultOptimizer() , 
-                                            starting_vector :: Union{Nothing , AbstractVector} = nothing,
+                                            e_starting  = nothing,
+                                            T_starting = nothing,
                                             temperature_range = nothing , 
                                             emissivity_range = nothing , 
                                             result_type=Val(:T))
 
-                    isnothing(starting_vector) && return fit_T!(emp , optimizer ; 
-                                                            emissivity_range = emissivity_range , 
-                                                            temperature_range = temperature_range , 
-                                                            result_type = result_type)
-
-                    return fit_T!(emp , starting_vector , optimizer ; 
+                    return fit_T!(emp , optimizer ; e_starting , T_starting,
                             emissivity_range = emissivity_range , 
                             temperature_range = temperature_range , 
                             result_type = result_type)
@@ -826,31 +848,20 @@ function _solve_problem(point::MWPPoint{N, Nx3, P} , starting_vector , lb , ub ,
                     SVector(ub))  
 
 end
-    """
-    covariance(bp::MWPPoint)
+
+"""
+    fitting_covariance(em::MWPPoint{N,Nx3,T}) where {N,Nx3,T}
 
 Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
 """
-function fitting_covariance(bp::MWPPoint{N,Nx3,P}) where {N,Nx3,P}
-    sigma_square = sumabs2(bp.e_p.ri)/degrees_of_freedom(bp)
-    h = similar(bp.hessian)
-    hess!(h, bp.x, bp::MWPPoint)
-    return 2*sigma_square*inv(h)
+function fitting_covariance(mwp::MWPPoint{N,Nx3,T}) where {N,Nx3,T}
+    sigma_square = sumabs2(mwp.r)/degrees_of_freedom(mwp)
+    #h = similar(em.hessian)
+    hess!(mwp , mwp.x)
+    return sigma_square * mwp.hessian\I
 end
-
-"""
-    fitting_covariance(em::EmPoint{N})
-
-Evaluates the covariance matrix as Cov(x) = 2σ²H⁻¹
-"""
-function fitting_covariance(em::EmPoint{N,Nx3,T}) where {N,Nx3,T}
-    sigma_square = sumabs2(em.ri)/degrees_of_freedom(em)
-    h = MMatrix{1,1,T,1}(undef)
-    hess!(h,temperature(em),em)
-    return 2*sigma_square*inv.(h)
-end
-
-fitting_variance(em::EmPoint) = vec(fitting_covariance(em))
+sumabs2(itr) = sum(t->t^2 , itr)
+fitting_variance(em::MWPPoint) = vec(fitting_covariance(em))
 
 struct MultiWavelengthPyrometer{N , T , MWP} <: AbstractPyrometer{N,T}
     mwp::MWP
@@ -864,7 +875,7 @@ const POLYNOMIAL_TYPES = (bernstein = BernsteinSymPoly ,
                             standard = StandPoly  )
 
 MultiWavelengthPyrometer(λ::StaticVector{N , T}  ;  
-                            starting_emissivity::NTuple{P} = (0.5 , 0.5 , 0.5 ) , 
+                            e_starting::NTuple{P} = (0.5 , 0.5 , 0.5 ) , 
                             T_starting::T = 1000.0,
                             i_measured::Union{Nothing , AbstractVector{T} , AbstractSpectralQuantity} = nothing,
                             polynomial_type::Val{PT} = Val(:bernstein) , 
@@ -880,23 +891,25 @@ MultiWavelengthPyrometer(λ::StaticVector{N , T}  ;
     PolyType = getfield(POLYNOMIAL_TYPES , PT)
     mwp = MWPPoint( _i, 
                    MVector{N , T}(λ) , 
-                   MVector{P , T}(starting_emissivity) , 
+                   MVector{P , T}(e_starting) , 
                    T_starting , 
                    PolyType{P , T}; 
                    I_sur = I_sur  
                    )
     return MultiWavelengthPyrometer(mwp)                            
 end
-MultiWavelengthPyrometer{N}(l::AbstractVector; kwargs...) where N = MultiWavelengthPyrometer(MVector{N}(l); kwargs...) 
-function MultiWavelengthPyrometer{N , P}(l::AbstractVector; 
-                            starting_emissivity::Union{Base.AbstractVecOrTuple , Nothing , Number} = nothing , 
+
+function MultiWavelengthPyrometer{N , P , PT}(l::AbstractVector; 
+                            e_starting::Union{Base.AbstractVecOrTuple , Nothing , Number} = nothing , 
                             T_starting::T = 1000.0,
                             i_measured::Union{Nothing , AbstractVector{T} , AbstractSpectralQuantity} = nothing,
-                            polynomial_type::Val{PT} = Val(:bernstein) , 
                             I_sur::Union{AbstractVector{T}, Nothing} = nothing) where {N , P , T <: Number , PT}
-    _starting_emissivity = _fill_N(starting_emissivity)                   
-    MultiWavelengthPyrometer(MVector{N}(l); starting_emissivity = _starting_emissivity , 
-    T_starting = T_starting , polynomial_type = polynomial_type , I_sur = I_sur , i_measured = i_measured)  
+
+    _starting_emissivity = _fill_N(Val(P) , e_starting)                   
+    MultiWavelengthPyrometer(MVector{N}(l); e_starting = _starting_emissivity , 
+                T_starting = T_starting , 
+                polynomial_type = Val(PT) , 
+                I_sur = I_sur , i_measured = i_measured)  
 end
 
 _fill_N(::Val{P} , tpl::NTuple{P}) where P = tpl 
@@ -905,6 +918,11 @@ _fill_N( ::Val{P} , tpl::T=0.5) where{P , T <: Number} = ntuple(P) do _
 end 
 _fill_N( ::Val{P} , ::Nothing) where{P} = _fill_N(Val(P))
 
+MultiWavelengthPyrometer{N , P}(l::AbstractVector; kwargs...) where {N , P} = MultiWavelengthPyrometer{N , P , :bernstein}(l; kwargs...) 
+MultiWavelengthPyrometer{N}(l::AbstractVector; kwargs...) where N = MultiWavelengthPyrometer{N , 3 , :bernstein}(l ; kwargs...) 
+
+
+clear_cache!(p::MultiWavelengthPyrometer) = clear_cache!(p.mwp)
 (p::MultiWavelengthPyrometer)(; kwargs...) = p.mwp( ; kwargs...)
 
 wavelengths(p::MultiWavelengthPyrometer) = p.mwp.bb.λ
@@ -1060,4 +1078,8 @@ function _solve_problem(point::BBPoint , starting_vector , lb , ub , ::DefaultOp
                     lb[],  
                     ub[])  
 
+end
+
+function sensitivity(mpw::MultiWavelengthPyrometer)
+    return (l = copy(mpw.mwp.bb.λ) , S = copy(mpw.mwp.jacobian))
 end

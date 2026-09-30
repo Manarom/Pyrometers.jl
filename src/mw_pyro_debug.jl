@@ -40,7 +40,8 @@ i = bb.(l , Ttrue)
 N = length(l)
 noise = 1e-3
 mwp = Pyrometers.MWPPoint{N , 3}(i .+ noise* randn(N), SVector{N}(l) , (0.2 , 0.3 , 0.4) , 1273.15)
-mwp(i , emissivity_range = (0.1 , 1.0))
+mwp(i , emissivity_range = (0.5 , 1.0) , e_starting = 0.99)
+Pyrometers.clear_cache!(mwp)
 Ttrue
 @benchmark $mwp(emissivity_range = (0.9 , 1.0))
 Pyrometers.fit_T!(mwp , MVector((0.2 , 0.3 , 0.4 , 1273.15)) , nothing ;  emissivity_range = (0.5 , 1.0))      
@@ -67,20 +68,27 @@ const upp_b = SVector(1.2, 1.2, 1.2, 1473.15)
     
     x_start = MVector(0.2, 0.9, 0.4, 1073.15); # Свежая стартовая точка
 )
-
+using StaticArrays
 e = Pyrometers.IsothermalSpectralQuantity(l->0.8 + l/10)
 bb = Pyrometers.PlanckEmitter()
 i = Pyrometers.fix_temperature(e * bb  , 1200.0)
-extrema(e.(l))
 l = range(1,2,50)
 N = length(l)
 poly_type = Pyrometers.ScaledPolynomials.BernsteinSymPoly{3,Float64}
 mwp = Pyrometers.MWPPoint(SVector{N}(i.(l)) , SVector{N}(l) , SVector(0.2 , 0.3 , 0.5) ,   1234.6 , poly_type)
 mwp(;emissivity_range = ((0.6 , 0.6 , 0.6) , (0.99 , 0.99 , 0.99)) , temperature_range = (1100.0 , 1300.0))
 Pyrometers.emissivity(mwp)
-mwp_pyro = Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
-mwp_pyro = Pyrometers.MultiWavelengthPyrometer(SVector{50}(l))
-@code_warntype Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
-epoly = Pyrometers.emissivity_poly(mwp)
+Pyrometers.emissivity_poly(mwp)
+Pyrometers.fitting_covariance(mwp)
+
+mwp_pyro = Pyrometers.MultiWavelengthPyrometer{50 , 4}(l ; i_measured = i)
+@code_warntype Pyrometers.MultiWavelengthPyrometer{50 , 5}(l ; i_measured = i)
+@benchmark Pyrometers.MultiWavelengthPyrometer{50 , 5}($l ; i_measured = $i)
+
+Pyrometers.clear_cache!(mwp_pyro)
+mwp_pyro(; emissivity_range = (0.8 , 1.0) , T_starting = 200 , e_starting=0.6)
+@benchmark $mwp_pyro()
+epoly = Pyrometers.emissivity_poly(mwp_pyro)
 
 poly = poly_type([0.1, 2.0 , 3.4])
+

@@ -30,7 +30,8 @@ module Pyrometers
         ViewFactorGeometry , 
         fix_temperature , 
         SpectralReflectivity,
-        emissivity , emissivity_poly
+        emissivity , 
+        emissivity_poly
     """
     Default pyrometers types 
 
@@ -49,6 +50,7 @@ const DefaultPyrometersTypes = OrderedDict(
     const IsothermalSpectralQuantity = Planck.IsothermalSpectralQuantity 
     const AnalyticalSpectralQuantity = Planck.AnalyticalSpectralQuantity
     const AbstractSpectralQuantity =  Planck.AbstractSpectralQuantity
+
     include("spectral_quantities.jl")
     include("pyrometers_types.jl")
     include("measure_func.jl")

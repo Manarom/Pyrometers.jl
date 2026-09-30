@@ -1009,6 +1009,12 @@ begin
 	λ = MVector{50}(range(λ_fit_vand[1] , λ_fit_vand[2] , 50))
 end
 
+# ╔═╡ 62a86ff0-98a9-4acf-bed0-91a5eab24209
+md" Ttrue = $(@bind Ttrue Slider(100:1.0:3000 , default = 1000.0 , show_value = true))"
+
+# ╔═╡ 646705d8-42e9-4204-ac7d-f2d63425b63c
+md" ϵ bounds = $(@bind e_bounds RangeSlider(0.01:1e-2:1.0))"
+
 # ╔═╡ c0f25834-2bc2-4c65-aefa-466d8017d461
 begin 
 	p_em = plot(λ, scaled_poly.(λ),label=nothing,linewidth=6; plot_common_args...)
@@ -1020,45 +1026,28 @@ end
 
 # ╔═╡ 963fb46a-0ea3-48b5-b62f-e37c8fde1864
 begin 
-	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ)}(λ)
+	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ) , 3 , :bernstein}(λ)
 	e_surf = IsothermalSpectralQuantity(scaled_poly)
-	i_measured = Pyrometers.fix_temperature(e_surf * PlanckEmitter() , 1234.6)
+	i_measured = Pyrometers.fix_temperature(e_surf * PlanckEmitter() , Ttrue)
 end
-
-# ╔═╡ a4a9f724-3a0b-4351-af90-778932ee2b1f
-multiwavelength_pyro(i_measured )
-
-# ╔═╡ 66ec489b-158d-4348-b6fe-aa7f3f772bd4
-typeof(multiwavelength_pyro)
-
-# ╔═╡ 1d53599d-9b03-4530-9bf3-2f2c20fd9615
-begin 
-	t1 = SVector(Tuple( vcat(a_real..., 20)))
-	t2 = SVector(Tuple( vcat(a_real... , 3000.0)))
-end
-
-# ╔═╡ ebde5455-47f4-4d9e-ba3e-11656c4dc3b5
-e_fitted = emissivity_poly(multiwavelength_pyro)
 
 # ╔═╡ a5f30290-343d-4a3a-ad85-589fbe8ed570
 begin 
-	plot(λ , e_surf.(λ) , label = "true")
-	plot!(λ , e_fitted.(λ) , label = "fitted")
+	Tpyro = multiwavelength_pyro(i_measured , emissivity_range = extrema(e_bounds))
+	e_fitted = emissivity_poly(multiwavelength_pyro)
+	plot(λ , e_surf.(λ) , label = "true : T=$(Ttrue)")
+	plot!(λ , e_fitted.(λ) , label = "fitted, T=$(Tpyro)")
 end
 
-# ╔═╡ da013910-4176-4b53-adb1-e8c76be6cae8
-#=begin 
-	e = Pyrometers.IsothermalSpectralQuantity(l->0.8 + l/10)
-	bb = Pyrometers.PlanckEmitter()
-	i = Pyrometers.fix_temperature(e * bb  , 1200.0)
-	l = range(1,2,50)
-	N = length(l)
-	poly_type = Pyrometers.ScaledPolynomials.BernsteinSymPoly{3,Float64}
-	mwp = Pyrometers.MWPPoint(SVector{N}(i.(l)) , SVector{N}(l) , SVector(0.2 , 0.3 , 0.5) ,   1234.6 , poly_type)
-	mwp(;emissivity_range = ((0.2 , 0.2 , 0.2) , (0.8 , 0.99 , 0.99)) , temperature_range = (1100.0 , 1300.0))
-	Pyrometers.emissivity(mwp)
-	mwp_pyro = Pyrometers.MultiWavelengthPyrometer{50}(l ; i_measured = i)
-end=#
+# ╔═╡ 6c712eb2-8e41-4d36-a4e3-077905eb4214
+begin 
+	sence = Pyrometers.sensitivity(multiwavelength_pyro)
+	sence_plot = plot(;plot_common_args...)
+	for (i , c) in enumerate(eachcol(sence.S))
+		plot!(sence.l , c , label = i)
+	end
+	sence_plot
+end
 
 # ╔═╡ Cell order:
 # ╟─30743a02-c643-4bdc-837e-b97299f9520a
@@ -1069,7 +1058,7 @@ end=#
 # ╟─171409eb-22b5-4bc5-a8e2-eac0932a24f3
 # ╟─643d9ff3-3a09-46c9-9013-92d111ccb229
 # ╟─d5ee3913-66be-47d7-a755-699ba64b4f98
-# ╠═d442014a-20e6-4be4-ac7f-f13de329dec5
+# ╟─d442014a-20e6-4be4-ac7f-f13de329dec5
 # ╟─27b3c586-9eb0-4a51-b9ca-a9c0379fccdf
 # ╟─f22d22b6-5d98-4cc4-998f-a53e92809618
 # ╟─b9bee300-59a4-4c7a-b525-439f5c62253e
@@ -1082,7 +1071,7 @@ end=#
 # ╟─5efd8d48-7fff-48fd-b361-2f06cd8bad53
 # ╟─af619a4d-b700-4996-960c-c9d0e75eac6a
 # ╟─0aad4eb6-e5dc-40e3-82b6-4d64f5b1af4f
-# ╠═e9e16b2b-88d7-40b6-997f-3a40e673faa8
+# ╟─e9e16b2b-88d7-40b6-997f-3a40e673faa8
 # ╟─2ad3ec82-54a2-49ac-94ef-579f808dfb1a
 # ╟─63d5b5bb-5e7d-4e83-83ae-3972f2465e28
 # ╟─95baff6c-2af3-401d-9db3-d6e6e31ab70a
@@ -1159,13 +1148,11 @@ end=#
 # ╟─c8647683-a25e-4c04-bae0-52a5f40233e9
 # ╟─7957b928-29db-4342-9993-15b63023883b
 # ╟─3b01166a-451e-4e15-ae34-7049703331f2
-# ╠═10c7b1f0-3565-456d-a4bf-84aff0aca60b
+# ╟─10c7b1f0-3565-456d-a4bf-84aff0aca60b
 # ╟─6a386feb-48a9-40ac-8fac-be492183ed2b
-# ╟─c0f25834-2bc2-4c65-aefa-466d8017d461
-# ╠═963fb46a-0ea3-48b5-b62f-e37c8fde1864
+# ╟─62a86ff0-98a9-4acf-bed0-91a5eab24209
+# ╟─646705d8-42e9-4204-ac7d-f2d63425b63c
 # ╠═a5f30290-343d-4a3a-ad85-589fbe8ed570
-# ╠═a4a9f724-3a0b-4351-af90-778932ee2b1f
-# ╠═66ec489b-158d-4348-b6fe-aa7f3f772bd4
-# ╠═1d53599d-9b03-4530-9bf3-2f2c20fd9615
-# ╠═ebde5455-47f4-4d9e-ba3e-11656c4dc3b5
-# ╠═da013910-4176-4b53-adb1-e8c76be6cae8
+# ╠═c0f25834-2bc2-4c65-aefa-466d8017d461
+# ╠═6c712eb2-8e41-4d36-a4e3-077905eb4214
+# ╠═963fb46a-0ea3-48b5-b62f-e37c8fde1864
