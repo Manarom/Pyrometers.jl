@@ -1,7 +1,7 @@
 using Pyrometers , PlanckFunctions
 using ForwardDiff , Zygote , QuadGK , ADTypes , DataInterpolations
 using Test
-
+using Optim , NLSolversBase
 
 const pl_fun = PlanckFunctions.ibb
 const ratio_fun = PlanckFunctions.spectral_ratio

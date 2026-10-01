@@ -26,11 +26,19 @@ begin
 	using Pyrometers  , Plots , PlutoUI , PrettyTables , DelimitedFiles , Interpolations 
 	using QuadGK , Pyrometers.StaticArrays
 	src_dir = joinpath(abspath(joinpath(notebook_dir,"..")),"src")
-	using ForwardDiff
 end;
+
+# ╔═╡ 0bee71f4-5961-4c80-8592-2b6c0d1b58a8
+	begin 
+		using ForwardDiff
+		using Optim , NLSolversBase
+	end
 
 # ╔═╡ 05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
 using BenchmarkTools , Test
+
+# ╔═╡ a8a27a41-95a2-41eb-a1cf-d3d51b2ec52e
+using LinearAlgebra
 
 # ╔═╡ 30743a02-c643-4bdc-837e-b97299f9520a
 md"""
@@ -54,6 +62,9 @@ The last line will launch the Pluto starting page in your default browser
 4) Open this notebook file located at  `project_folder\notebooks\radiation_pyrometry.jl` in `Pluto` by providing the full path to the *"Open a notebook"* text field on `Pluto`'s starting page.
 
 """
+
+# ╔═╡ f728a59d-c78c-45af-a9e5-656be490eb4f
+Revise.retry()
 
 # ╔═╡ abdc809b-b53c-4dff-ba6f-c636c73f3fca
 const Planck = Pyrometers.Planck
@@ -896,7 +907,7 @@ Now, the optimization problem can be formulated:
 
 where ``\vec{a}`` is the column vector of emissivity approximation (  ``[]^t`` stays for transposition), ``\vec{x}^*`` is the local minimum
 
-To solve this optimization problem `BandPyrometry.jl` package provides functions to evaluate the discrepancy function ``F``, ``\nabla F`` and ``\nabla^2F`` which are needed to solve the optimization problem using zero, first or second order optimization algorithms. It also has special type to work with the emissivity linear approximation.
+To solve this optimization problem `Pyrometers.jl` package provides functions to evaluate the discrepancy function ``F``, ``\nabla F`` and ``\nabla^2F`` which are needed to solve the optimization problem using zero, first or second order optimization algorithms. It also has special type to work with the emissivity linear approximation.
 
 """
 
@@ -966,7 +977,7 @@ md"Measured spectrum fitting region:"
 md"Select the polynomial type = $(@bind poly_type confirm(Select(collect(keys(Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES)),default = :bernsteinsym)))"
 
 # ╔═╡ 7957b928-29db-4342-9993-15b63023883b
-md"Set polynomial degree : $(@bind real_poly_degree confirm(Select(0:6,default=3))) (the polynomial degree= numer of basis functions-1, thus zero order polynomial is constant)"
+md"Set polynomial degree for real emissivity: $(@bind real_poly_degree confirm(Select(0:6,default=3))) (the polynomial degree= numer of basis functions-1, thus zero order polynomial is constant)"
 
 # ╔═╡ 3b01166a-451e-4e15-ae34-7049703331f2
 md"""
@@ -1004,7 +1015,7 @@ end
 
 # ╔═╡ 10c7b1f0-3565-456d-a4bf-84aff0aca60b
 begin 
-	poly_obj = Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[poly_type](a_real)
+	poly_obj = Pyrometers.ScaledPolynomials.SUPPORTED_POLYNOMIAL_TYPES[poly_type](a_real[1:real_poly_degree])
 	scaled_poly = SP.ScaledPolynomial(poly_obj , xmin = λ_fit_vand[1] , xmax =λ_fit_vand[2])
 	λ = MVector{50}(range(λ_fit_vand[1] , λ_fit_vand[2] , 50))
 end
@@ -1015,6 +1026,9 @@ md" Ttrue = $(@bind Ttrue Slider(100:1.0:3000 , default = 1000.0 , show_value = 
 # ╔═╡ 646705d8-42e9-4204-ac7d-f2d63425b63c
 md" ϵ bounds = $(@bind e_bounds RangeSlider(0.01:1e-2:1.0))"
 
+# ╔═╡ 3bc1a1a0-5d6a-405a-ac3a-e67541e023c5
+md" Tstarting $(@bind Tstarting Slider(100:1.0:3000 , default = 1200.0 , show_value = true))"
+
 # ╔═╡ c0f25834-2bc2-4c65-aefa-466d8017d461
 begin 
 	p_em = plot(λ, scaled_poly.(λ),label=nothing,linewidth=6; plot_common_args...)
@@ -1024,19 +1038,33 @@ begin
 	p_em
 end
 
+# ╔═╡ 229e5f0b-5d91-4996-9ca8-beaa689ea2da
+@bind refit Button("refit")
+
+# ╔═╡ ac1babcb-5dad-4bc6-bb4c-c707dbd57fa0
+ParticleSwarm
+
 # ╔═╡ 963fb46a-0ea3-48b5-b62f-e37c8fde1864
 begin 
-	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ) , 3 , :bernstein}(λ)
 	e_surf = IsothermalSpectralQuantity(scaled_poly)
 	i_measured = Pyrometers.fix_temperature(e_surf * PlanckEmitter() , Ttrue)
+	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ) , poly_fit_degree , :bernstein}(λ , i_measured=i_measured)
+end
+
+# ╔═╡ f6c0cbdf-d2a6-47c7-bc58-edc071760df9
+begin 
+	refit 
+	multiwavelength_pyro(emissivity_range = extrema(e_bounds) , optimizer = GradientDescent)
+
 end
 
 # ╔═╡ a5f30290-343d-4a3a-ad85-589fbe8ed570
 begin 
-	Tpyro = multiwavelength_pyro(i_measured , emissivity_range = extrema(e_bounds))
+	refit
 	e_fitted = emissivity_poly(multiwavelength_pyro)
 	plot(λ , e_surf.(λ) , label = "true : T=$(Ttrue)")
-	plot!(λ , e_fitted.(λ) , label = "fitted, T=$(Tpyro)")
+	plot!(λ , e_fitted.(λ) , label = "fitted, T=$(Pyrometers.temperature(multiwavelength_pyro))")
+	title!("Emissivity identification result and measured temperature")
 end
 
 # ╔═╡ 6c712eb2-8e41-4d36-a4e3-077905eb4214
@@ -1052,8 +1080,10 @@ end
 # ╔═╡ Cell order:
 # ╟─30743a02-c643-4bdc-837e-b97299f9520a
 # ╠═5e712312-0fc7-4205-84cc-834d57b814a3
+# ╠═f728a59d-c78c-45af-a9e5-656be490eb4f
 # ╟─abdc809b-b53c-4dff-ba6f-c636c73f3fca
-# ╟─bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
+# ╠═0bee71f4-5961-4c80-8592-2b6c0d1b58a8
+# ╠═bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
 # ╟─05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
 # ╟─171409eb-22b5-4bc5-a8e2-eac0932a24f3
 # ╟─643d9ff3-3a09-46c9-9013-92d111ccb229
@@ -1136,9 +1166,9 @@ end
 # ╟─ba559d2d-3bd0-4cd1-8836-8ab0b860c3a5
 # ╟─4f6c8a96-2347-496a-8d71-1d410fa30ac9
 # ╠═805cd62e-a188-4e3f-a870-990530cbc7db
-# ╠═5a56e1db-5909-443f-8f8f-e8a640b9bd3e
+# ╟─5a56e1db-5909-443f-8f8f-e8a640b9bd3e
 # ╟─253847d7-87fa-461d-8361-fac6c6facf73
-# ╠═86b4b811-7c70-49a5-92f2-4ba409a0ef32
+# ╟─86b4b811-7c70-49a5-92f2-4ba409a0ef32
 # ╟─4894c2ab-4db5-4b7c-9c4a-9dd1c5345c28
 # ╟─c2582621-54fb-44b1-a3ea-4cfacb6062ff
 # ╟─c7554489-1d97-4b9a-a3e9-4be84c82b552
@@ -1151,8 +1181,13 @@ end
 # ╟─10c7b1f0-3565-456d-a4bf-84aff0aca60b
 # ╟─6a386feb-48a9-40ac-8fac-be492183ed2b
 # ╟─62a86ff0-98a9-4acf-bed0-91a5eab24209
-# ╟─646705d8-42e9-4204-ac7d-f2d63425b63c
+# ╠═646705d8-42e9-4204-ac7d-f2d63425b63c
+# ╟─3bc1a1a0-5d6a-405a-ac3a-e67541e023c5
+# ╟─c0f25834-2bc2-4c65-aefa-466d8017d461
+# ╠═229e5f0b-5d91-4996-9ca8-beaa689ea2da
+# ╠═f6c0cbdf-d2a6-47c7-bc58-edc071760df9
+# ╠═ac1babcb-5dad-4bc6-bb4c-c707dbd57fa0
 # ╠═a5f30290-343d-4a3a-ad85-589fbe8ed570
-# ╠═c0f25834-2bc2-4c65-aefa-466d8017d461
 # ╠═6c712eb2-8e41-4d36-a4e3-077905eb4214
 # ╠═963fb46a-0ea3-48b5-b62f-e37c8fde1864
+# ╠═a8a27a41-95a2-41eb-a1cf-d3d51b2ec52e

@@ -76,7 +76,7 @@ l = range(1,2,50)
 N = length(l)
 poly_type = Pyrometers.ScaledPolynomials.BernsteinSymPoly{3,Float64}
 mwp = Pyrometers.MWPPoint(SVector{N}(i.(l)) , SVector{N}(l) , SVector(0.2 , 0.3 , 0.5) ,   1234.6 , poly_type)
-mwp(;emissivity_range = ((0.6 , 0.6 , 0.6) , (0.99 , 0.99 , 0.99)) , temperature_range = (1100.0 , 1300.0))
+mwp(;emissivity_range = ((0.6 , 0.6 , 0.6) , (0.99 , 0.99 , 0.99)) , temperature_range = (1100.0 , 1300.0) , optimizer = LBFGS)
 Pyrometers.emissivity(mwp)
 Pyrometers.emissivity_poly(mwp)
 Pyrometers.fitting_covariance(mwp)
@@ -92,3 +92,4 @@ epoly = Pyrometers.emissivity_poly(mwp_pyro)
 
 poly = poly_type([0.1, 2.0 , 3.4])
 
+mwp_pyro(;optimizer = LBFGS)

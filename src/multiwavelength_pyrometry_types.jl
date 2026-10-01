@@ -773,7 +773,6 @@ end
 function make_starting_vector(mwp::SimplyTypedMW{N, P, T} , 
                             ::Nothing , t::Number) where {N, P, T}
     sv =  get_default_starting_vector(mwp)
-    @show N , P , T
     sv[end] = T(t)
     return sv  
 end
@@ -795,6 +794,7 @@ function fit_T!(point::Union{BBPoint , MWPPoint},
                                                   D }                                
         (lb , ub) = evaluate_box_constraints(point, emissivity_range, temperature_range)
         trim_starting_vector_to_box!(starting_vector , lb , ub)
+        #@show starting_vector , lb , ub
         (results , optimizer , problem) = _solve_problem(point , starting_vector , lb , ub , optimizer)
         return  fitting_result(point, results, optimizer , problem , result_type) 
                         
@@ -923,11 +923,10 @@ MultiWavelengthPyrometer{N}(l::AbstractVector; kwargs...) where N = MultiWavelen
 
 
 clear_cache!(p::MultiWavelengthPyrometer) = clear_cache!(p.mwp)
-(p::MultiWavelengthPyrometer)(; kwargs...) = p.mwp( ; kwargs...)
 
 wavelengths(p::MultiWavelengthPyrometer) = p.mwp.bb.λ
 measured(p::MultiWavelengthPyrometer) = measured(p.mwp)
-
+temperature(p::MultiWavelengthPyrometer) = temperature(p.mwp)
 calculated(p::MultiWavelengthPyrometer) = p.mwp.Ic
 emissivity(p::MultiWavelengthPyrometer) = p.mwp.ϵ
 emissivity_poly(p::MultiWavelengthPyrometer) = emissivity_poly(p.mwp)
@@ -947,9 +946,11 @@ function lm_step(x, p::MWPPoint{N, Nx3, P}, λ::Real) where {N, Nx3, P}
     hess!(p, x) 
     H = SMatrix(p.hessian)
     J = SMatrix(p.jacobian)
+    #D = 
     r = SVector(p.r)
     Jt = transpose(J)
-    Δx = (H + λ * I) \ (- Jt* r)
+    #Δx = (H + λ * I) \ (- Jt* r)
+    Δx = (H + λ * Diagonal(diag(H))) \ (-Jt* r)
     return Δx
 end
 
@@ -957,15 +958,17 @@ function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm
                 x::MVector{P , T} ,  
                 lower_bounds::SVector{P, T},  
                 upper_bounds::SVector{P, T}; 
-                atol::Real = 1e-8 , max_num_steps::Int = 500) where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
+                atol::Real = 1e-8 , max_num_steps::Int = 50) where {N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}
 
     n = 0
     d_current = disc(x, mwp) 
     λ = 1e-2 
     x_trial = copy(x)
-    
+    # @show lower_bounds , upper_bounds , x_trial
     while (d_current >= atol) && (n <= max_num_steps) 
-        
+        # @show λ
+        # @show d_current
+
         p_step = lm_step(x, mwp, λ) #lm step calculation 
         
         @. x_trial = x - p_step
@@ -979,6 +982,8 @@ function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm
         end 
 
         d_trial = disc(x_trial, mwp)
+        
+        #@show d_trial
 
        if d_trial < d_current
             @. x = x_trial      # success
@@ -987,10 +992,13 @@ function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm
         else
             λ *= 7.0            # unsuccesfull step increase demping
         end
-        #@show λ
+        #@show d_current
         n += 1
     end
     copyto!(mwp.x , x_trial)
+    #@show λ
+    #@show n 
+    #@show d_current
     return (mwp , (λ = λ , n = n , d = d_current) , DefaultOptimizer())
 end
 

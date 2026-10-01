@@ -326,7 +326,7 @@ Surface emissivity , measured intensity (temperature dependent with temperature 
 (p::AbstractPyrometer)(imeasured, 
                         ϵ::AbstractContinuousOrDiscreteQuantity; T_starting = 600.0,  segbuf=nothing,  kwargs...) = measure(p , imeasured,  ϵ; T_starting = T_starting,  segbuf=segbuf,  kwargs...)
 (p::MultiWavelengthPyrometer)(i;kwargs...)  = measure(p , i ;kwargs...)
-(p::MultiWavelengthPyrometer)(;kwargs...)  = p(;kwargs...)
+(p::MultiWavelengthPyrometer)(;kwargs...)  = p.mwp(;kwargs...)
 (p::AbstractPyrometer)(i::AbstractContinuousOrDiscreteQuantity , 
                     radiation_temperature::Number , 
                     ϵ::AbstractContinuousOrDiscreteQuantity; 
