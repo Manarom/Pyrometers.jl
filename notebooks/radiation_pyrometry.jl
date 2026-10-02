@@ -21,18 +21,18 @@ begin
 	import Pkg 
 	notebook_dir = @__DIR__()
 	Pkg.activate(notebook_dir)
-	Pkg.resolve()
+	#Pkg.resolve()
 	using Revise
 	using Pyrometers  , Plots , PlutoUI , PrettyTables , DelimitedFiles , Interpolations 
 	using QuadGK , Pyrometers.StaticArrays
 	src_dir = joinpath(abspath(joinpath(notebook_dir,"..")),"src")
-end;
+end
 
 # ╔═╡ 0bee71f4-5961-4c80-8592-2b6c0d1b58a8
-	begin 
-		using ForwardDiff
-		using Optim , NLSolversBase
-	end
+begin 
+	using ForwardDiff
+	using Optimization , OptimizationOptimJL
+end
 
 # ╔═╡ 05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
 using BenchmarkTools , Test
@@ -1046,17 +1046,21 @@ ParticleSwarm
 
 # ╔═╡ 963fb46a-0ea3-48b5-b62f-e37c8fde1864
 begin 
-	e_surf = IsothermalSpectralQuantity(scaled_poly)
+	#e_surf = IsothermalSpectralQuantity(scaled_poly)
+	e_surf = IsothermalSpectralQuantity(rt_emissivity_interpolation)
 	i_measured = Pyrometers.fix_temperature(e_surf * PlanckEmitter() , Ttrue)
-	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ) , poly_fit_degree , :bernstein}(λ , i_measured=i_measured)
+	multiwavelength_pyro = Pyrometers.MultiWavelengthPyrometer{length(λ) , poly_fit_degree + 1 , :bernstein}(λ , i_measured=i_measured)
 end
 
 # ╔═╡ f6c0cbdf-d2a6-47c7-bc58-edc071760df9
 begin 
 	refit 
-	multiwavelength_pyro(emissivity_range = extrema(e_bounds) , optimizer = GradientDescent)
+	multiwavelength_pyro(emissivity_range = extrema(e_bounds)  )
 
 end
+
+# ╔═╡ 4c25dd8f-8661-4955-820d-3133daad4bf0
+multiwavelength_pyro.mwp.x
 
 # ╔═╡ a5f30290-343d-4a3a-ad85-589fbe8ed570
 begin 
@@ -1066,6 +1070,9 @@ begin
 	plot!(λ , e_fitted.(λ) , label = "fitted, T=$(Pyrometers.temperature(multiwavelength_pyro))")
 	title!("Emissivity identification result and measured temperature")
 end
+
+# ╔═╡ 3b5fed3f-d92b-4c9e-abd5-63a268047fcf
+e_fitted
 
 # ╔═╡ 6c712eb2-8e41-4d36-a4e3-077905eb4214
 begin 
@@ -1081,7 +1088,7 @@ end
 # ╟─30743a02-c643-4bdc-837e-b97299f9520a
 # ╠═5e712312-0fc7-4205-84cc-834d57b814a3
 # ╠═f728a59d-c78c-45af-a9e5-656be490eb4f
-# ╟─abdc809b-b53c-4dff-ba6f-c636c73f3fca
+# ╠═abdc809b-b53c-4dff-ba6f-c636c73f3fca
 # ╠═0bee71f4-5961-4c80-8592-2b6c0d1b58a8
 # ╠═bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
 # ╟─05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
@@ -1172,13 +1179,13 @@ end
 # ╟─4894c2ab-4db5-4b7c-9c4a-9dd1c5345c28
 # ╟─c2582621-54fb-44b1-a3ea-4cfacb6062ff
 # ╟─c7554489-1d97-4b9a-a3e9-4be84c82b552
-# ╟─5815a317-233a-493a-a8be-03dc7d608c0e
+# ╠═5815a317-233a-493a-a8be-03dc7d608c0e
 # ╟─77b352db-6734-4501-b9d3-f63ff2adbaf7
 # ╟─bf58aa17-dc84-4bee-94d3-25895b12f553
 # ╟─c8647683-a25e-4c04-bae0-52a5f40233e9
-# ╟─7957b928-29db-4342-9993-15b63023883b
+# ╠═7957b928-29db-4342-9993-15b63023883b
 # ╟─3b01166a-451e-4e15-ae34-7049703331f2
-# ╟─10c7b1f0-3565-456d-a4bf-84aff0aca60b
+# ╠═10c7b1f0-3565-456d-a4bf-84aff0aca60b
 # ╟─6a386feb-48a9-40ac-8fac-be492183ed2b
 # ╟─62a86ff0-98a9-4acf-bed0-91a5eab24209
 # ╠═646705d8-42e9-4204-ac7d-f2d63425b63c
@@ -1186,8 +1193,10 @@ end
 # ╟─c0f25834-2bc2-4c65-aefa-466d8017d461
 # ╠═229e5f0b-5d91-4996-9ca8-beaa689ea2da
 # ╠═f6c0cbdf-d2a6-47c7-bc58-edc071760df9
+# ╠═4c25dd8f-8661-4955-820d-3133daad4bf0
 # ╠═ac1babcb-5dad-4bc6-bb4c-c707dbd57fa0
 # ╠═a5f30290-343d-4a3a-ad85-589fbe8ed570
+# ╠═3b5fed3f-d92b-4c9e-abd5-63a268047fcf
 # ╠═6c712eb2-8e41-4d36-a4e3-077905eb4214
 # ╠═963fb46a-0ea3-48b5-b62f-e37c8fde1864
 # ╠═a8a27a41-95a2-41eb-a1cf-d3d51b2ec52e

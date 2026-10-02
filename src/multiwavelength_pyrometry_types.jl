@@ -848,7 +848,7 @@ function _solve_problem(point::MWPPoint{N, Nx3, P} , starting_vector , lb , ub ,
                     SVector(ub))  
 
 end
-
+_solve_problem(point, starting_vector , lb , ub , ::Nothing) = _solve_problem(point , starting_vector , lb , ub , DefaultOptimizer())
 """
     fitting_covariance(em::MWPPoint{N,Nx3,T}) where {N,Nx3,T}
 
