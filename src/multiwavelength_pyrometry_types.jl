@@ -267,8 +267,8 @@ function evaluate_box_constraints(bp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, 
         temperature_range::C = nothing )  where {B <: Union{Nothing , NTuple{2 , T} ,  NTuple{2 , <: Union{NTuple{Pm1 ,T} , StaticVector{Pm1 , T}} } } ,
                                                 C <: Union{Nothing , NTuple{2,T}} } where {N, Nx3, P, NxP, 
                                                             PxP, Pm1, NxPm1, Pm1xPm1, T}
-    # method calculates box constraints 
-    # of the feasible region (dumb version)
+    #   method calculates box constraints 
+    #   of the feasible region (dumb version)
         lb = copy(bp.x)
         ub = copy(bp.x)
         e_lb = @view lb[1:end - 1] 
@@ -942,7 +942,7 @@ set_measured!(p::MultiWavelengthPyrometer , i::AbstractVector) = set_measured!(p
 
 Function to evaluate the Levenberg-Marquardt step 
 """
-function lm_step(x, p::MWPPoint{N, Nx3, P}, λ::Real) where {N, Nx3, P}
+function lm_step_old(x, p::MWPPoint{N, Nx3, P}, λ::Real) where {N, Nx3, P}
     hess!(p, x) 
     H = SMatrix(p.hessian)
     J = SMatrix(p.jacobian)
@@ -950,10 +950,37 @@ function lm_step(x, p::MWPPoint{N, Nx3, P}, λ::Real) where {N, Nx3, P}
     r = SVector(p.r)
     Jt = transpose(J)
     #Δx = (H + λ * I) \ (- Jt* r)
-    Δx = (H + λ * Diagonal(diag(H))) \ (-Jt* r)
+    Δx = (H + λ * Diagonal(diag(H))) \ (- Jt * r)
     return Δx
 end
+function lm_step(x, p::MWPPoint{N, Nx3, P}, lower_bounds, upper_bounds, λ::Real) where {N, Nx3, P}
+    hess!(p, x) 
+    
+    
+    H_m = MMatrix(p.hessian)
+    J_m = MMatrix(p.jacobian)
+    r = SVector(p.r)
+    Jt_r = MVector(transpose(J_m) * r) 
 
+    tol = 1e-10 
+    
+    for i in 1:P
+        on_lower = abs(x[i] - lower_bounds[i]) < tol
+        on_upper = abs(x[i] - upper_bounds[i]) < tol
+        
+        if (on_lower && Jt_r[i] > 0) || (on_upper && Jt_r[i] < 0)
+            for j in 1:P
+                H_m[i, j] = 0.0
+                H_m[j, i] = 0.0
+            end
+            H_m[i, i] = 1.0     
+            Jt_r[i] = 0.0      
+        end
+    end
+    H = SMatrix(H_m)
+    Δx = (H + λ * Diagonal(diag(H))) \ (-SVector(Jt_r))
+    return Δx
+end
 function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm1, T}, 
                 x::MVector{P , T} ,  
                 lower_bounds::SVector{P, T},  
@@ -969,7 +996,7 @@ function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm
         # @show λ
         # @show d_current
 
-        p_step = lm_step(x, mwp, λ) #lm step calculation 
+        p_step = lm_step(x, mwp, lower_bounds, upper_bounds , λ) #lm step calculation 
         
         @. x_trial = x - p_step
     
@@ -992,13 +1019,9 @@ function robust_lm_search!(mwp::MWPPoint{N, Nx3, P, NxP, PxP, Pm1, NxPm1, Pm1xPm
         else
             λ *= 7.0            # unsuccesfull step increase demping
         end
-        #@show d_current
         n += 1
     end
-    copyto!(mwp.x , x_trial)
-    #@show λ
-    #@show n 
-    #@show d_current
+    copyto!(mwp.x, x)
     return (mwp , (λ = λ , n = n , d = d_current) , DefaultOptimizer())
 end
 

@@ -1,5 +1,5 @@
 ### A Pluto.jl notebook ###
-# v1.0.3
+# v1.1.0
 
 using Markdown
 using InteractiveUtils
@@ -324,8 +324,7 @@ p_custom = RadiationPyrometers.Pyrometer(type = "Custom",λ = [2.5, 3.7],ϵ=0.65
 """
 
 # ╔═╡ e2a9aa39-2490-4681-89d3-a01f058f6feb
-pretty_table(HTML,Pyrometers.DefaultPyrometersTypes,top_left_string ="Table of default pyrometers types provied by `RadiationPyrometers.jl` package and corresponding wavelength regions",wrap_table_in_div=true)
-
+Pyrometers.DefaultPyrometersTypes
 
 # ╔═╡ 02eee968-ff43-4b82-8d68-efede1a220dd
 md"""
@@ -1041,9 +1040,6 @@ end
 # ╔═╡ 229e5f0b-5d91-4996-9ca8-beaa689ea2da
 @bind refit Button("refit")
 
-# ╔═╡ ac1babcb-5dad-4bc6-bb4c-c707dbd57fa0
-ParticleSwarm
-
 # ╔═╡ 963fb46a-0ea3-48b5-b62f-e37c8fde1864
 begin 
 	#e_surf = IsothermalSpectralQuantity(scaled_poly)
@@ -1091,9 +1087,9 @@ end
 # ╠═abdc809b-b53c-4dff-ba6f-c636c73f3fca
 # ╠═0bee71f4-5961-4c80-8592-2b6c0d1b58a8
 # ╠═bf833e74-f9e7-4b60-b6bc-2a6a58c5c901
-# ╟─05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
-# ╟─171409eb-22b5-4bc5-a8e2-eac0932a24f3
-# ╟─643d9ff3-3a09-46c9-9013-92d111ccb229
+# ╠═05c05c84-02d4-4b7f-83df-bd1fa3e4ee4d
+# ╠═171409eb-22b5-4bc5-a8e2-eac0932a24f3
+# ╠═643d9ff3-3a09-46c9-9013-92d111ccb229
 # ╟─d5ee3913-66be-47d7-a755-699ba64b4f98
 # ╟─d442014a-20e6-4be4-ac7f-f13de329dec5
 # ╟─27b3c586-9eb0-4a51-b9ca-a9c0379fccdf
@@ -1185,16 +1181,15 @@ end
 # ╟─c8647683-a25e-4c04-bae0-52a5f40233e9
 # ╠═7957b928-29db-4342-9993-15b63023883b
 # ╟─3b01166a-451e-4e15-ae34-7049703331f2
-# ╠═10c7b1f0-3565-456d-a4bf-84aff0aca60b
+# ╟─10c7b1f0-3565-456d-a4bf-84aff0aca60b
 # ╟─6a386feb-48a9-40ac-8fac-be492183ed2b
 # ╟─62a86ff0-98a9-4acf-bed0-91a5eab24209
-# ╠═646705d8-42e9-4204-ac7d-f2d63425b63c
+# ╟─646705d8-42e9-4204-ac7d-f2d63425b63c
 # ╟─3bc1a1a0-5d6a-405a-ac3a-e67541e023c5
-# ╟─c0f25834-2bc2-4c65-aefa-466d8017d461
+# ╠═c0f25834-2bc2-4c65-aefa-466d8017d461
 # ╠═229e5f0b-5d91-4996-9ca8-beaa689ea2da
 # ╠═f6c0cbdf-d2a6-47c7-bc58-edc071760df9
 # ╠═4c25dd8f-8661-4955-820d-3133daad4bf0
-# ╠═ac1babcb-5dad-4bc6-bb4c-c707dbd57fa0
 # ╠═a5f30290-343d-4a3a-ad85-589fbe8ed570
 # ╠═3b5fed3f-d92b-4c9e-abd5-63a268047fcf
 # ╠═6c712eb2-8e41-4d36-a4e3-077905eb4214
