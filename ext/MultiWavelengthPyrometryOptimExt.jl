@@ -8,19 +8,21 @@ module MultiWavelengthPyrometryOptimExt
 
     const DEFAULT_MWOPTIMIZER = LBFGS
     const DEFAULT_BBOPTIMIZER = Brent
-    function P._solve_problem(p::P.BBPoint , _ , lb::Number , ub::Number , ::Nothing ) 
+
+    #=function P._solve_problem(p::P.BBPoint , _ , lb::Number , ub::Number , ::Nothing ) 
             f_scalar(x) = Pyrometers.disc(SVector{1}(x), p)
             return (optimize(f_scalar, lb , ub , Brent()) , Brent , nothing)
-    end
-    P._solve_problem(p::P.BBPoint , _ , 
+    end=#
+   #= P._solve_problem(p::P.BBPoint , _ , 
                         lb::AbstractVector , 
                         ub::AbstractVector , 
                         ::Nothing )  = P._solve_problem(p , nothing , last(lb) , last(ub) , nothing )
+=#
     function P._solve_problem(point::Union{P.BBPoint , P.MWPPoint} ,
                                                 starting_vector , 
                                                 lb , 
                                                 ub , 
-                                                optimizer )               
+                                                optimizer::Type{<:Optim.AbstractOptimizer})               
 
             f = NLSolversBase.only_fgh!(make_fgh!(point))
             if lb !== nothing && ub !== nothing

@@ -260,8 +260,9 @@ end
 
 # Multiwavelength pyrometry 
 
-measure(p::MultiWavelengthPyrometer , i::AbstractVector; 
-                                starting_vector = nothing , kwargs...) = p.mwp(i; starting_vector = starting_vector)
+measure(p::MultiWavelengthPyrometer , i::AbstractVector; kwargs...) = p.mwp(i; kwargs...)
+
+measure(p::MultiWavelengthPyrometer , i::Union{IsothermalSpectralQuantity , AbstractDiscreteQuantity};   kwargs...) = measure(p , integrate(p , i) ; kwargs...)
 
 #measure(p::MultiWavelengthPyrometer , i::Union{IsothermalSpectralQuantity , Abstract}; 
                         #starting_vector = nothing) = p.mwp(i.(wavelength(p)); starting_vector = starting_vector)
@@ -324,7 +325,8 @@ Surface emissivity , measured intensity (temperature dependent with temperature 
 (p::AbstractPyrometer)(i  , ϵ::Union{Number , NTuple{2}}; T_starting::Number=1000.0,  segbuf=nothing,  kwargs...) = measure(p , i  , ϵ ;  T_starting = T_starting,  segbuf=segbuf,  kwargs...)                    
 (p::AbstractPyrometer)(imeasured, 
                         ϵ::AbstractContinuousOrDiscreteQuantity; T_starting = 600.0,  segbuf=nothing,  kwargs...) = measure(p , imeasured,  ϵ; T_starting = T_starting,  segbuf=segbuf,  kwargs...)
-
+(p::MultiWavelengthPyrometer)(i;kwargs...)  = measure(p , i ;kwargs...)
+(p::MultiWavelengthPyrometer)(;kwargs...)  = p.mwp(;kwargs...)
 (p::AbstractPyrometer)(i::AbstractContinuousOrDiscreteQuantity , 
                     radiation_temperature::Number , 
                     ϵ::AbstractContinuousOrDiscreteQuantity; 
